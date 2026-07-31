@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "test": "node --experimental-strip-types --test src/engine/*.test.ts",
-    "spike": "node --experimental-strip-types src/spikes/confabulation.ts"
+    "spike": "node --env-file-if-exists=../forgetting-stage-notes/.env --experimental-strip-types src/spikes/confabulation.ts"
   }
 }

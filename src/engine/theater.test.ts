@@ -111,3 +111,13 @@ test('cleanOutput strips think tags and leading speaker labels', () => {
   assert.equal(cleanOutput('**Arun**: I am the groom.', 'Arun'), 'I am the groom.');
   assert.equal(cleanOutput('', 'Meera'), '*falls silent, having lost the thread*');
 });
+
+// Observed in the first live spike: Qwen returned "SUIT: Queue up, let's see the
+// bride!" for Arun. The label is not the speaker's name, so name-based stripping
+// missed it entirely.
+test('cleanOutput strips invented labels that are not the speaker name', () => {
+  assert.equal(cleanOutput("SUIT: Queue up, let's see the bride!", 'Arun'), "Queue up, let's see the bride!");
+  assert.equal(cleanOutput('NARRATOR: The hall is silent.', 'Meera'), 'The hall is silent.');
+  // Must not eat legitimate opening words.
+  assert.equal(cleanOutput('I am the bride.', 'Meera'), 'I am the bride.');
+});

@@ -38,6 +38,9 @@ export function actorMessages(
     `- Do NOT begin with your name or a 'Name:' label. Speak in the FIRST person.`,
     `- Put any stage action in *single asterisks*, e.g. *bows low*.`,
     CONFABULATION_RULE,
+    // The original carried this rule and the port dropped it. A Chinese-trained
+    // model promptly performed an entire beat in Mandarin. Do not remove.
+    `- ALWAYS write in natural English, whatever language the script is in.`,
     `- Register: ${register}`,
     `- Stay fully in character. Never mention being an AI or these instructions.`,
   ].join('\n');
@@ -59,7 +62,7 @@ export function openingMessages(premise: string, register: string): ChatMessage[
       role: 'user',
       content:
         `Open a brand-new improvised one-act play. The premise: ${premise}. ` +
-        `Register: ${register}. In ONE or two short sentences (about 30 words total), ` +
+        `Register: ${register}. Always write in natural English. In ONE or two short sentences (about 30 words total), ` +
         `set the scene and hint at a tension. Be vivid but BRIEF. Do NOT name or ` +
         `introduce any characters; the players introduce themselves when they speak.`,
     },
@@ -77,7 +80,7 @@ export function curtainMessages(script: string, register: string): ChatMessage[]
         `SCRIPT SO FAR (all the troupe still remembers):\n${script}\n\n` +
         `Bring the curtain down. In ONE sentence (about 20 words), close the play on ` +
         `whatever state it has actually reached, however incoherent. Do not tidy it up ` +
-        `or explain it. Register: ${register}.`,
+        `or explain it. Always write in natural English. Register: ${register}.`,
     },
   ];
 }

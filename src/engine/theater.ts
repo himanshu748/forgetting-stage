@@ -235,6 +235,9 @@ export function cleanOutput(raw: string, speakerName: string): string {
     new RegExp(`^\\s*[>"'“”\\[(]*\\s*${name}\\s*[:,\\-\\u2013\\u2014]\\s*`, 'i'),
     '',
   );
+  // Small models also invent labels that are not the speaker's name at all
+  // (observed: "SUIT: Queue up..."). Strip any leading shouty label.
+  text = text.replace(/^\s*[>"'“”[(]*\s*[A-Z][A-Z' .]{1,20}:\s*/, '');
 
   if (text.length >= 2 && /["'“”]/.test(text[0]) && /["'“”]/.test(text[text.length - 1])) {
     text = text.slice(1, -1).trim();
