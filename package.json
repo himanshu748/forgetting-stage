@@ -1,0 +1,9 @@
+{
+  "name": "forgetting-stage-engine",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test src/engine/*.test.ts",
+    "spike": "node --experimental-strip-types src/spikes/confabulation.ts"
+  }
+}
