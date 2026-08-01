@@ -1,4 +1,7 @@
-export type BeatKind = 'narration' | 'line' | 'direction' | 'curtain';
+// 'seed' holds the premise and the cast list. They sit in shared memory rather
+// than only in the system prompt, so the troupe can forget what the play is
+// about and who is in it. They are the oldest beats, so they go first.
+export type BeatKind = 'seed' | 'narration' | 'line' | 'direction' | 'curtain';
 
 export type Beat = {
   id: number;

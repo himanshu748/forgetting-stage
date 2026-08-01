@@ -31,11 +31,33 @@ function play(e: TheaterEngine, lines: string[]) {
   }
 }
 
+test('opening seeds the premise and the cast into memory', () => {
+  const e = engine(1000);
+  e.prepareOpening('a wedding');
+  const seeds = e.memory.filter((b) => b.kind === 'seed');
+  assert.equal(seeds.length, 1 + CAST.length, 'premise plus one seed per cast member');
+  assert.equal(seeds[0].text, 'a wedding');
+  assert.ok(e.memoryTokens() > 0, 'seeds must consume budget');
+});
+
 test('beats accumulate while under budget', () => {
   const e = engine(1000);
   play(e, ['I am the bride.', 'I am the groom.']);
-  assert.equal(e.memory.length, 3);
+  // 1 premise seed + 3 cast seeds + 1 opening narration + 2 lines
+  assert.equal(e.memory.length, 7);
   assert.equal(e.forgotten.length, 0);
+});
+
+test('seeds are evicted first, so the troupe forgets what the play is', () => {
+  const e = engine(30);
+  e.prepareOpening('a wedding where nobody agrees who is marrying whom');
+  e.commitOpening('The hall is full.');
+  for (let i = 0; i < 4; i += 1) {
+    const { speaker } = e.prepareBeat();
+    e.commitBeat(speaker, `Line ${i} carrying a good number of extra words to burn budget.`);
+  }
+  assert.ok(e.forgotten.length > 0, 'expected eviction');
+  assert.equal(e.forgotten[0].kind, 'seed', 'the oldest beat is a seed, so it goes first');
 });
 
 test('oldest beat is evicted once over budget', () => {

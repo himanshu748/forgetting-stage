@@ -32,6 +32,7 @@ import {
 } from './types.ts';
 
 export function scriptLine(beat: Beat): string {
+  if (beat.kind === 'seed') return `[${beat.speaker}: ${beat.text}]`;
   if (beat.kind === 'direction') return `[Director's note: ${beat.text}]`;
   if (beat.kind === 'narration' || beat.kind === 'curtain') {
     return `NARRATOR: ${beat.text}`;
@@ -131,6 +132,15 @@ export class TheaterEngine {
     this.allBeats = [];
     this.turn = 0;
     this.nextId = 0;
+
+    // The premise and the cast go into shared memory, not just the system
+    // prompt, so the troupe can forget what the play is about and who is in it.
+    // They are seeded first, so they are the first things lost.
+    this.appendAndEvict(this.newBeat('The play', '🎪', premise, 'seed'));
+    for (const member of this.cast) {
+      this.appendAndEvict(this.newBeat(member.name, member.emoji, member.persona, 'seed'));
+    }
+
     return openingMessages(premise, this.register);
   }
 
