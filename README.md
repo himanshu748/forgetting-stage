@@ -16,7 +16,7 @@ the player composes rather than competes.
 
 ## Run it
 
-Nothing here needs an API key except the spike.
+The deterministic test suite needs no API key. Live spikes, plays and experiments use Hugging Face Inference.
 
 ```bash
 npm test
@@ -31,6 +31,16 @@ HF_TOKEN=hf_xxx npm run spike
 ```
 
 The go/no-go check described below. Optionally set `MODEL` to compare candidates.
+
+```bash
+HF_TOKEN=hf_xxx npm run experiment
+```
+
+Runs a matched backend experiment with two arms: the normal 1,000-token memory and a control where eviction is effectively disabled. Both arms use the same premise, cast, rounds and completion contract. The command prints a comparison report and writes structured JSON to `artifacts/latest-experiment.json`.
+
+Configure it with `ROUNDS`, `BUDGET`, `CONTROL_BUDGET`, `PREMISE`, `MODEL` and `OUTPUT`. Experiment artifacts are local and ignored by Git.
+
+The result records the first eviction round, forgotten beats, forgotten seeds, final memory size, per-character drift and whether the control remained intact. A causal signal of `isolated` means eviction occurred only in the forgetting arm. It does not claim semantic drift by itself. Review the paired transcripts or add a semantic scorer before making that stronger claim.
 
 ## The one thing that decides whether this works
 
@@ -52,7 +62,9 @@ src/engine/types.ts        Beat, Character, budget constants
 src/engine/prompts.ts      The inverted confabulation prompt, registers, curtain
 src/engine/theater.ts      Ported engine: memory, eviction, pins, drift
 src/engine/theater.test.ts Proof the cap and pins are real
-src/spikes/confabulation.ts  Go/no-go check
+src/experiments/matched.ts  Reusable forgetting vs control orchestration
+src/experiments/run.ts      Live experiment CLI and JSON artifact writer
+src/spikes/confabulation.ts Go/no-go check
 ```
 
 Ported from the original `theater.py`, keeping its best decision: no model, no network
@@ -62,7 +74,7 @@ and drift is derived from beat attribution so it needs no extra model call.
 
 ## Status
 
-Engine ported and tested. Spike written, not yet run. No UI yet.
+Engine ported and tested. Matched experiment backend, live runner and structured reporting are available. No UI yet.
 
 ## Licence
 
