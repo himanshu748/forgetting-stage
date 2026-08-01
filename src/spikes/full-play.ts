@@ -34,8 +34,14 @@ function bar(fraction: number): string {
   return `[${'█'.repeat(filled)}${'░'.repeat(24 - filled)}]`;
 }
 
+// Control mode. A huge budget means nothing is ever evicted, so we can compare
+// a play that forgets against one that does not, same premise and same cast.
+// The open question: does forgetting CAUSE the drift, or merely accompany it?
+const BUDGET = Number(process.env.BUDGET ?? 1000);
+
 async function main() {
-  const engine = new TheaterEngine({ cast: CAST, countTokens: approxTokens });
+  const engine = new TheaterEngine({ cast: CAST, countTokens: approxTokens, budget: BUDGET });
+  if (BUDGET > 1000) console.log('*** CONTROL RUN: eviction effectively disabled ***\n');
 
   console.log(`model: ${MODEL}`);
   console.log(`premise: ${PREMISE}`);

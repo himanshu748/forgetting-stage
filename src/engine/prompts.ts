@@ -17,12 +17,31 @@ export const NARRATOR: Character = {
 //
 // This is the highest-leverage prompt in the build. If confabulation does not
 // diverge between actors, there is no product.
+// MEASURED Aug 1: an earlier version of this rule told actors to invent confident
+// replacements, but never told them to respect what was still in front of them.
+// Result: they confabulated constantly, including over facts that were present.
+// A control play with eviction DISABLED drifted just as wildly as one with it on,
+// which meant the 1,000 token cap was decorative and the mechanic was invisible.
+//
+// Consistency is now the default and confabulation is the exception. The only
+// way an actor can contradict the play is if a fact has genuinely been evicted.
 const CONFABULATION_RULE = [
-  '- You can ONLY know what appears in SCRIPT SO FAR. Anything absent is gone.',
-  '- When something is missing, you MUST invent a specific, confident replacement',
-  '  and state it as settled fact. Never hedge, never say you forgot, never ask.',
-  '- NEVER acknowledge a gap, a memory, or that anything was lost.',
-  '- If another actor asserts something you do not have, you may flatly disagree.',
+  '- SCRIPT SO FAR is the complete and only truth about this play.',
+  '- Every detail present in it is settled fact. NEVER contradict, rename, alter',
+  '  or second-guess anything that appears there. Build on it precisely.',
+  '- Do NOT introduce new named people, places or events unless you need one to',
+  '  answer something the script does not cover. Keep the play tight.',
+  '- ONLY when a needed detail is genuinely ABSENT from the script may you invent',
+  '  one, and then you must state it as confident settled fact.',
+  '',
+  '  ABSOLUTE RULE, this outranks everything above. You are never confused and',
+  '  your character is never confused. You are always completely certain.',
+  '  BANNED, never write anything resembling these: "I think", "I forgot",',
+  '  "trying to remember", "what was it again", "I am not sure", "uh", "um",',
+  '  "wait", "remind me", or any character struggling to recall anything.',
+  '  Where the script is silent you do not hesitate, you ASSERT. Pick a specific',
+  '  name, number or fact and deliver it as though it were never in doubt.',
+  '- If another actor states something absent from the script, flatly disagree.',
 ].join('\n');
 
 export function actorMessages(
