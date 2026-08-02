@@ -6,16 +6,22 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#090807",
+    "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.himanshujha.forgettingstage"
     },
     "android": {
       "package": "com.himanshujha.forgettingstage",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#090807"
+      },
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "bundler": "metro",
+      "favicon": "./assets/favicon.png",
       "name": "The Forgetting Stage",
       "shortName": "Forgetting Stage",
       "themeColor": "#090807",

@@ -18,6 +18,8 @@ the player composes rather than competes.
 
 The repository now includes a mobile-first Expo game with three complete screens: premise selection, a live stage and the final drift report. The playable demo runs entirely offline with deterministic performances, so no model token is ever shipped to the client.
 
+![The Forgetting Stage frontend](assets/day-3-frontend-showcase.png)
+
 ```bash
 npm install
 npm start
