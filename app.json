@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "The Forgetting Stage",
+    "slug": "the-forgetting-stage",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#090807",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.himanshujha.forgettingstage"
+    },
+    "android": {
+      "package": "com.himanshujha.forgettingstage",
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "name": "The Forgetting Stage",
+      "shortName": "Forgetting Stage",
+      "themeColor": "#090807",
+      "backgroundColor": "#090807"
+    }
+  }
+}

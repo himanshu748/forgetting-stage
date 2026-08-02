@@ -5,3 +5,7 @@ build-in-public/
 PRD.md
 brand/
 artifacts/
+.expo/
+dist/
+web-build/
+*.tsbuildinfo
