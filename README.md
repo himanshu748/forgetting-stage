@@ -16,7 +16,7 @@ the player composes rather than competes.
 
 ## Play it
 
-The repository now includes a mobile-first Expo game with three complete screens: premise selection, a live stage and the final drift report. The playable demo runs entirely offline with deterministic performances, so no model token is ever shipped to the client.
+The repository now includes a mobile-first Expo game with premise selection, a live AI stage, the final drift report and a RevenueCat-powered Director's Pass. One complete AI performance is free per local calendar day and refreshes at midnight; the `directors_pass` entitlement unlocks unlimited performances. If live generation is unavailable, the current turn falls back to a deterministic performance without breaking the game.
 
 ![The Forgetting Stage frontend](assets/day-3-frontend-showcase.png)
 
@@ -26,6 +26,35 @@ npm start
 ```
 
 Use `npm run ios`, `npm run android` or `npm run web` for a specific platform. During a play you can pin exactly one actor line, spend one director note, watch shared memory evict its oldest facts and compare each actor's first and final certainty at curtain.
+
+## Live AI gateway
+
+The mobile client calls the narrow `POST /api/generate` contract. The server validates the premise and speaker against the shipped game content, reconstructs system prompts itself, caps body and script sizes, rate-limits by caller, applies a provider timeout and returns safe errors. `HF_TOKEN` remains server-only.
+
+```bash
+HF_TOKEN=hf_xxx MODEL=meta-llama/Llama-3.1-8B-Instruct npx vercel dev
+```
+
+Deploy the Expo web output and `api/generate.ts` on a host that supports TypeScript serverless functions, or place the same handler behind your mobile API domain. Never prefix `HF_TOKEN` with `EXPO_PUBLIC_`.
+
+## RevenueCat and the daily curtain
+
+Install and configure a RevenueCat project with:
+
+- Entitlement: `directors_pass`
+- Offering: a current offering containing the Director's Pass package
+- A Test Store product for development, then platform products before store release
+
+The app checks, purchases and restores the entitlement through `react-native-purchases`. Set one public key for development or the platform keys for release:
+
+```bash
+EXPO_PUBLIC_REVENUECAT_TEST_API_KEY=test_xxx
+# Release builds instead use:
+EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=appl_xxx
+EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=goog_xxx
+```
+
+The one-free-performance ledger is stored locally and resets on the next local calendar day. Director's Pass holders bypass the ledger. RevenueCat's Test Store can simulate success, failure and cancellation, but real native purchase testing requires an Expo development build rather than ordinary Expo Go. Never ship a Test Store API key in a production build.
 
 ## Engine and experiments
 
@@ -77,6 +106,10 @@ src/engine/theater.ts      Ported engine: memory, eviction, pins, drift
 App.tsx                    Expo game: lobby, live stage and drift report
 src/game/content.ts        Premises, cast and deterministic demo performances
 src/game/session.ts        Frontend game loop around the pure engine
+src/game/performance.ts    Live generation provider with offline fallback
+src/live/gateway.ts        Server-only validation, rate limits and model calls
+src/monetization/           Daily refresh ledger and RevenueCat adapter
+api/generate.ts            Serverless live-generation entry point
 src/engine/theater.test.ts Proof the cap and pins are real
 src/experiments/matched.ts Reusable forgetting vs control orchestration
 src/experiments/run.ts      Live experiment CLI and JSON artifact writer
@@ -90,7 +123,7 @@ and drift is derived from beat attribution so it needs no extra model call.
 
 ## Status
 
-Playable Expo game, pure memory engine, matched experiment backend and structured reporting are all available. The client currently uses deterministic offline performances. A production model service can replace that provider without moving credentials into the app.
+The native Expo game, pure memory engine, matched experiment backend, secure live-generation gateway, daily free curtain and RevenueCat Director's Pass integration are implemented. Production launch still requires a real RevenueCat project and store products, a deployed generation endpoint, platform API keys and native EAS/store builds.
 
 ## Licence
 

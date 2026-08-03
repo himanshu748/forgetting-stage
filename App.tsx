@@ -1,9 +1,10 @@
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -18,18 +19,46 @@ import {
 import type { Beat } from './src/engine/types.ts';
 import { CAST, PREMISES, type PremiseOption } from './src/game/content.ts';
 import {
+  createPerformanceProvider,
+  createPerformanceSession,
+  type PerformanceMode,
+  type PerformanceSession,
+} from './src/game/performance.ts';
+import {
   DEMO_ROUNDS,
-  addDirectorNote,
-  advanceGameSession,
   canFinish,
-  createGameSession,
-  finishGameSession,
   pinBeat,
   snapshotSession,
   type GameSession,
 } from './src/game/session.ts';
+import { createLiveGenerator } from './src/live/client.ts';
+import {
+  canStartPerformance,
+  consumePerformance,
+  ledgerFromState,
+  normalizeDailyPass,
+  type DailyPassState,
+} from './src/monetization/daily-pass.ts';
+import {
+  createRevenueCatClient,
+  type DirectorPackage,
+  type MonetizationStatus,
+} from './src/monetization/revenuecat.ts';
+import { createLedgerStorage } from './src/monetization/storage.ts';
 
 type Screen = 'lobby' | 'stage' | 'drift';
+
+const performanceProvider = createPerformanceProvider(createLiveGenerator());
+const ledgerStorage = createLedgerStorage(() => import('@react-native-async-storage/async-storage'));
+const revenueCat = createRevenueCatClient({
+  platform: Platform.OS,
+  loadPurchases: () => import('react-native-purchases'),
+});
+const emptyMonetization: MonetizationStatus = {
+  configured: false,
+  unlimited: false,
+  packages: [],
+};
 
 type ButtonProps = {
   label: string;
@@ -108,7 +137,15 @@ function Rule({ number, title, copy }: { number: string; title: string; copy: st
   );
 }
 
-function Lobby({ onStart }: { onStart: (premise: PremiseOption) => void }) {
+function Lobby({
+  onStart,
+  pass,
+  onShowPaywall,
+}: {
+  onStart: (premise: PremiseOption) => void | Promise<void>;
+  pass: DailyPassState | null;
+  onShowPaywall: () => void;
+}) {
   const { width } = useWindowDimensions();
   const [selected, setSelected] = useState(PREMISES[0]?.id ?? 'wedding');
   const compact = width < 760;
@@ -173,8 +210,25 @@ function Lobby({ onStart }: { onStart: (premise: PremiseOption) => void }) {
                 ))}
               </View>
             </View>
-            <ActionButton label="Raise the curtain" onPress={() => onStart(choice)} />
-            <Text style={styles.demoNote}>Playable offline demo. No account or API key required.</Text>
+            <View style={styles.dailyPassPanel}>
+              <Text style={styles.dailyPassKicker}>{pass?.unlimited ? "DIRECTOR'S PASS ACTIVE" : 'DAILY CURTAIN'}</Text>
+              <Text style={styles.dailyPassCopy}>
+                {pass?.unlimited
+                  ? 'Unlimited performances are unlocked.'
+                  : pass && pass.remaining < 1
+                    ? 'Today’s free AI performance is spent. Your curtain refreshes at local midnight.'
+                    : 'One complete AI performance is free every day.'}
+              </Text>
+            </View>
+            <ActionButton
+              label={pass?.unlimited || (pass?.remaining ?? 1) > 0 ? 'Raise the curtain' : "Unlock Director's Pass"}
+              onPress={() => {
+                if (!pass || canStartPerformance(pass)) void onStart(choice);
+                else onShowPaywall();
+              }}
+            />
+            {!pass?.unlimited && <ActionButton label="View Director's Pass" variant="ghost" onPress={onShowPaywall} />}
+            <Text style={styles.demoNote}>A RevenueCat entitlement unlocks unlimited performances. Offline preview remains available.</Text>
           </View>
         </View>
       </ScrollView>
@@ -250,6 +304,9 @@ function Stage({
   onPin,
   onFinish,
   onExit,
+  mode,
+  busy,
+  fallbackReason,
 }: {
   session: GameSession;
   onAdvance: () => void;
@@ -257,6 +314,9 @@ function Stage({
   onPin: (id: number) => void;
   onFinish: () => void;
   onExit: () => void;
+  mode: PerformanceMode;
+  busy: boolean;
+  fallbackReason: string | null;
 }) {
   const { width } = useWindowDimensions();
   const [note, setNote] = useState('');
@@ -290,7 +350,12 @@ function Stage({
               <Text style={styles.backLabel}>← LEAVE STAGE</Text>
             </Pressable>
             <View style={styles.stageTitleBlock}>
-              <Text style={styles.stageKicker}>LIVE PERFORMANCE</Text>
+              <View style={styles.liveStatusRow}>
+                <Text style={styles.stageKicker}>LIVE PERFORMANCE</Text>
+                <View style={[styles.modeBadge, mode === 'offline' && styles.modeBadgeOffline]}>
+                  <Text style={styles.modeBadgeText}>{mode === 'live' ? 'AI LIVE' : 'OFFLINE FALLBACK'}</Text>
+                </View>
+              </View>
               <Text style={styles.stageTitle}>{session.premise}</Text>
             </View>
             <View style={styles.roundPill}>
@@ -373,12 +438,16 @@ function Stage({
 
               <View style={styles.stageActions}>
                 {snapshot.canAdvance ? (
-                  <ActionButton label={actionLabel} onPress={onAdvance} />
+                  <ActionButton label={busy ? 'Generating performance...' : actionLabel} disabled={busy} onPress={onAdvance} />
                 ) : (
-                  <ActionButton label="Bring down the curtain" variant="danger" onPress={onFinish} />
+                  <ActionButton label={busy ? 'Writing the curtain...' : 'Bring down the curtain'} disabled={busy} variant="danger" onPress={onFinish} />
                 )}
-                <Text style={styles.stageFootnote}>
-                  {canFinish(session) ? 'The damage is done. End when ready.' : 'Every line consumes the shared script.'}
+                <Text style={[styles.stageFootnote, fallbackReason && styles.fallbackFootnote]}>
+                  {fallbackReason
+                    ? 'Live AI was unavailable, so this turn used the offline performance.'
+                    : canFinish(session)
+                      ? 'The damage is done. End when ready.'
+                      : 'Every line consumes the shared script.'}
                 </Text>
               </View>
             </View>
@@ -386,6 +455,58 @@ function Stage({
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+function Paywall({
+  visible,
+  status,
+  busy,
+  error,
+  onClose,
+  onPurchase,
+  onRestore,
+}: {
+  visible: boolean;
+  status: MonetizationStatus;
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onPurchase: (pkg: DirectorPackage) => void;
+  onRestore: () => void;
+}) {
+  const pkg = status.packages[0];
+  return (
+    <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+      <View style={styles.modalShade}>
+        <View style={styles.paywallCard}>
+          <Text style={styles.paywallKicker}>THE DIRECTOR'S PASS</Text>
+          <Text style={styles.paywallTitle}>The curtain never has to close.</Text>
+          <Text style={styles.paywallBody}>Unlock unlimited AI performances and premium director controls while supporting the experiment.</Text>
+          <View style={styles.paywallBenefits}>
+            <Text style={styles.paywallBenefit}>◆ Unlimited performances</Text>
+            <Text style={styles.paywallBenefit}>◆ Every premise, every day</Text>
+            <Text style={styles.paywallBenefit}>◆ Restore access across supported devices</Text>
+          </View>
+          {pkg ? (
+            <ActionButton
+              label={busy ? 'Contacting the box office...' : `Unlock for ${pkg.price || 'the listed price'}`}
+              disabled={busy}
+              onPress={() => onPurchase(pkg)}
+            />
+          ) : (
+            <Text style={styles.paywallUnavailable}>
+              {status.configured
+                ? 'The current RevenueCat offering has no package yet.'
+                : 'Billing is not configured in this build. Add a public RevenueCat Test Store or platform API key.'}
+            </Text>
+          )}
+          <ActionButton label={busy ? 'Please wait...' : 'Restore purchases'} variant="ghost" disabled={busy || !status.configured} onPress={onRestore} />
+          <ActionButton label="Not tonight" variant="ghost" disabled={busy} onPress={onClose} />
+          {error && <Text style={styles.paywallError}>{error}</Text>}
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -442,7 +563,7 @@ function Drift({ session, onReplay, onNewPlay }: { session: GameSession; onRepla
         </View>
 
         <View style={styles.driftActions}>
-          <ActionButton label="Replay this premise" onPress={onReplay} />
+          <ActionButton label="Perform again" onPress={onReplay} />
           <ActionButton label="Choose another disaster" variant="ghost" onPress={onNewPlay} />
         </View>
       </ScrollView>
@@ -452,13 +573,34 @@ function Drift({ session, onReplay, onNewPlay }: { session: GameSession; onRepla
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('lobby');
-  const [session, setSession] = useState<GameSession | null>(null);
+  const [performance, setPerformance] = useState<PerformanceSession | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [pass, setPass] = useState<DailyPassState | null>(null);
+  const [monetization, setMonetization] = useState(emptyMonetization);
+  const [paywallVisible, setPaywallVisible] = useState(false);
+  const [paywallBusy, setPaywallBusy] = useState(false);
+  const [paywallError, setPaywallError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const session = performance?.session ?? null;
   const fade = useRef(new Animated.Value(1)).current;
   const premise = useMemo(
     () => PREMISES.find((item) => item.id === session?.premiseId) ?? PREMISES[0],
     [session?.premiseId],
   );
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([ledgerStorage.load(), revenueCat.status()])
+      .then(([ledger, status]) => {
+        if (!active) return;
+        setMonetization(status);
+        setPass(normalizeDailyPass(ledger, new Date(), status.unlimited));
+      })
+      .catch(() => {
+        if (active) setPass(normalizeDailyPass(null, new Date(), false));
+      });
+    return () => { active = false; };
+  }, []);
 
   const transition = (next: Screen) => {
     Animated.timing(fade, {
@@ -478,15 +620,84 @@ export default function App() {
     });
   };
 
-  const start = (choice: PremiseOption) => {
-    setSession(createGameSession(choice.id, choice.premise));
-    setRevision((value) => value + 1);
+  const start = async (choice: PremiseOption) => {
+    const currentPass = normalizeDailyPass(
+      pass ? ledgerFromState(pass) : null,
+      new Date(),
+      monetization.unlimited,
+    );
+    if (!canStartPerformance(currentPass)) {
+      setPass(currentPass);
+      setPaywallVisible(true);
+      return;
+    }
+    const consumed = consumePerformance(currentPass);
+    setPass(consumed);
+    await ledgerStorage.save(ledgerFromState(consumed));
+
+    const next = createPerformanceSession(choice.id, choice.premise);
+    setPerformance(next);
+    setBusy(true);
     transition('stage');
+    await performanceProvider.open(next);
+    setBusy(false);
+    setRevision((value) => value + 1);
   };
 
-  const mutate = (operation: (value: GameSession) => void) => {
-    if (!session) return;
-    operation(session);
+  const advance = async () => {
+    if (!performance || busy) return;
+    setBusy(true);
+    await performanceProvider.advance(performance);
+    setBusy(false);
+    setRevision((value) => value + 1);
+  };
+
+  const finish = async () => {
+    if (!performance || busy) return;
+    setBusy(true);
+    await performanceProvider.finish(performance);
+    setBusy(false);
+    setRevision((value) => value + 1);
+    transition('drift');
+  };
+
+  const updateMonetization = (status: MonetizationStatus) => {
+    setMonetization(status);
+    setPass((current) => normalizeDailyPass(
+      current ? ledgerFromState(current) : null,
+      new Date(),
+      status.unlimited,
+    ));
+    if (status.unlimited) setPaywallVisible(false);
+  };
+
+  const purchase = async (pkg: DirectorPackage) => {
+    setPaywallBusy(true);
+    setPaywallError(null);
+    try {
+      updateMonetization(await revenueCat.purchase(pkg));
+    } catch (error) {
+      setPaywallError(error instanceof Error ? error.message : 'Purchase failed');
+    } finally {
+      setPaywallBusy(false);
+    }
+  };
+
+  const restore = async () => {
+    setPaywallBusy(true);
+    setPaywallError(null);
+    try {
+      updateMonetization(await revenueCat.restore());
+    } catch (error) {
+      setPaywallError(error instanceof Error ? error.message : 'Restore failed');
+    } finally {
+      setPaywallBusy(false);
+    }
+  };
+
+  const mutate = (operation: (value: PerformanceSession) => void) => {
+    if (!performance) return;
+    operation(performance);
     setRevision((value) => value + 1);
   };
 
@@ -499,17 +710,23 @@ export default function App() {
     <View style={styles.app} key={revision > -1 ? 'game' : 'unused'}>
       <StatusBar style="light" />
       <Animated.View style={[styles.flex, { opacity: fade }]}>
-        {screen === 'lobby' && <Lobby onStart={start} />}
-        {screen === 'stage' && session && (
+        {screen === 'lobby' && (
+          <Lobby
+            pass={pass}
+            onShowPaywall={() => setPaywallVisible(true)}
+            onStart={(choice) => { void start(choice); }}
+          />
+        )}
+        {screen === 'stage' && session && performance && (
           <Stage
             session={session}
-            onAdvance={() => mutate(advanceGameSession)}
-            onDirection={(note) => mutate((value) => addDirectorNote(value, note))}
-            onPin={(id) => mutate((value) => { pinBeat(value, id); })}
-            onFinish={() => {
-              mutate(finishGameSession);
-              transition('drift');
-            }}
+            mode={performance.mode}
+            busy={busy}
+            fallbackReason={performance.lastFallbackReason}
+            onAdvance={() => { void advance(); }}
+            onDirection={(note) => mutate((value) => { performanceProvider.direction(value, note); })}
+            onPin={(id) => mutate((value) => { pinBeat(value.session, id); })}
+            onFinish={() => { void finish(); }}
             onExit={() => transition('lobby')}
           />
         )}
@@ -517,6 +734,15 @@ export default function App() {
           <Drift session={session} onReplay={replay} onNewPlay={() => transition('lobby')} />
         )}
       </Animated.View>
+      <Paywall
+        visible={paywallVisible}
+        status={monetization}
+        busy={paywallBusy}
+        error={paywallError}
+        onClose={() => setPaywallVisible(false)}
+        onPurchase={(pkg) => { void purchase(pkg); }}
+        onRestore={() => { void restore(); }}
+      />
     </View>
   );
 }
@@ -570,11 +796,27 @@ const styles = StyleSheet.create({
   actionGhostLabel: { color: colors.paper },
   actionDangerLabel: { color: '#fff8ef' },
   demoNote: { color: '#786c5a', fontSize: 10, textAlign: 'center', marginTop: 12 },
+  dailyPassPanel: { borderWidth: 1, borderColor: '#c8bca8', padding: 12, marginBottom: 12, backgroundColor: '#eee2ce' },
+  dailyPassKicker: { color: '#7b5515', fontSize: 9, letterSpacing: 1.5, fontWeight: '900' },
+  dailyPassCopy: { color: '#4f4538', fontSize: 11, lineHeight: 17, marginTop: 5 },
+  modalShade: { flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  paywallCard: { width: '100%', maxWidth: 480, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.gold, padding: 24, gap: 12 },
+  paywallKicker: { color: colors.gold, fontSize: 10, letterSpacing: 2.2, fontWeight: '900' },
+  paywallTitle: { color: colors.paper, fontSize: 32, lineHeight: 36, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }), fontWeight: '700' },
+  paywallBody: { color: colors.smoke, fontSize: 14, lineHeight: 22 },
+  paywallBenefits: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.line, paddingVertical: 12, gap: 8 },
+  paywallBenefit: { color: colors.paper, fontSize: 13 },
+  paywallUnavailable: { color: colors.gold, fontSize: 12, lineHeight: 18, borderWidth: 1, borderColor: colors.goldSoft, padding: 12 },
+  paywallError: { color: colors.ember, fontSize: 11, lineHeight: 16, textAlign: 'center' },
   stageShell: { flexGrow: 1, paddingHorizontal: '3.5%', paddingTop: 16, paddingBottom: 18, minHeight: '100%' },
   stageHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 18, borderBottomWidth: 1, borderBottomColor: colors.line, paddingBottom: 14 },
   backLabel: { color: colors.smoke, fontSize: 10, letterSpacing: 1.7, fontWeight: '800' },
   stageTitleBlock: { flex: 1, alignItems: 'center' },
   stageKicker: { color: colors.ember, fontSize: 9, letterSpacing: 2, fontWeight: '900' },
+  liveStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  modeBadge: { borderWidth: 1, borderColor: colors.mint, paddingVertical: 3, paddingHorizontal: 6 },
+  modeBadgeOffline: { borderColor: colors.gold },
+  modeBadgeText: { color: colors.paper, fontSize: 7, letterSpacing: 1.1, fontWeight: '900' },
   stageTitle: { color: colors.paper, fontSize: 18, marginTop: 5, textAlign: 'center', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
   roundPill: { minWidth: 72, borderWidth: 1, borderColor: colors.line, paddingVertical: 7, paddingHorizontal: 10, alignItems: 'center' },
   roundPillTop: { color: colors.smoke, fontSize: 8, letterSpacing: 1.4, fontWeight: '800' },
@@ -633,6 +875,7 @@ const styles = StyleSheet.create({
   noteCounter: { color: '#766b5e', fontSize: 9 },
   stageActions: { marginTop: 'auto', gap: 9 },
   stageFootnote: { color: '#766b5e', fontSize: 9, textAlign: 'center' },
+  fallbackFootnote: { color: colors.gold },
   driftScroll: { paddingHorizontal: '5%', paddingTop: 44, paddingBottom: 60, maxWidth: 1120, width: '100%', alignSelf: 'center' },
   driftHeader: { maxWidth: 760, alignSelf: 'center', alignItems: 'center' },
   driftKicker: { color: colors.ember, fontSize: 10, letterSpacing: 2.4, fontWeight: '900' },

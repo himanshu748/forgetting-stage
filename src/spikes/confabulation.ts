@@ -53,7 +53,7 @@ const SCRIPT_WITH_A_HOLE = [
 const QUESTION = "\n\n[Director's note: State plainly who the bride is. Be specific.]";
 
 async function main() {
-  const register = REGISTERS[DEFAULT_REGISTER];
+  const register = REGISTERS[DEFAULT_REGISTER]!;
   console.log(`model: ${MODEL}\n`);
   console.log('SCRIPT (the bride was evicted, nobody has ever seen her name):');
   console.log(SCRIPT_WITH_A_HOLE, '\n');

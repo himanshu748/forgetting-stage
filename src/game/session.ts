@@ -48,6 +48,7 @@ export function createGameSession(
   premiseId: string,
   premise: string,
   cast: Character[] = CAST,
+  options: { commitOpening?: boolean } = {},
 ): GameSession {
   const engine = new TheaterEngine({
     cast,
@@ -55,7 +56,7 @@ export function createGameSession(
     budget: DEMO_BUDGET,
   });
   engine.prepareOpening(premise);
-  engine.commitOpening(openingFor(premiseId));
+  if (options.commitOpening ?? true) engine.commitOpening(openingFor(premiseId));
   return {
     engine,
     premiseId,
@@ -68,14 +69,36 @@ export function createGameSession(
   };
 }
 
-export function advanceGameSession(session: GameSession): Beat {
+export function commitGeneratedOpening(session: GameSession, text = openingFor(session.premiseId)): Beat {
+  if (session.complete) throw new Error('the play has already ended');
+  return session.engine.commitOpening(text);
+}
+
+export function prepareGameBeat(session: GameSession): { speaker: Character } {
+  if (session.complete) throw new Error('the play has already ended');
+  return { speaker: session.engine.nextSpeaker() };
+}
+
+export function advanceGameSession(session: GameSession, preparedSpeaker?: Character): Beat {
   if (session.complete) throw new Error('the play has already ended');
 
-  const { speaker } = session.engine.prepareBeat();
-  const beat = session.engine.commitBeat(
+  const speaker = preparedSpeaker ?? session.engine.nextSpeaker();
+  return commitGeneratedBeat(
+    session,
     speaker,
     lineFor(session.premiseId, session.round, session.turnInRound, speaker),
   );
+}
+
+export function commitGeneratedBeat(
+  session: GameSession,
+  speaker: Character,
+  text: string,
+): Beat {
+  if (session.complete) throw new Error('the play has already ended');
+  const expected = session.engine.nextSpeaker();
+  if (expected.name !== speaker.name) throw new Error('prepared speaker is no longer current');
+  const beat = session.engine.commitBeat(speaker, text);
   session.lastForgotten = session.engine.lastForgotten.map((item) => ({ ...item }));
   session.turnInRound += 1;
 
@@ -96,10 +119,15 @@ export function addDirectorNote(session: GameSession, note: string): Beat {
 }
 
 export function finishGameSession(session: GameSession): Beat {
-  if (session.complete) throw new Error('the play has already ended');
-  const beat = session.engine.commitCurtain(
+  return commitGeneratedCurtain(
+    session,
     CURTAINS[session.premiseId] ?? 'The curtain falls before anyone can agree what just happened.',
   );
+}
+
+export function commitGeneratedCurtain(session: GameSession, text: string): Beat {
+  if (session.complete) throw new Error('the play has already ended');
+  const beat = session.engine.commitCurtain(text);
   session.lastForgotten = session.engine.lastForgotten.map((item) => ({ ...item }));
   session.complete = true;
   return beat;

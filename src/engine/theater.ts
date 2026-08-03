@@ -62,7 +62,7 @@ export class TheaterEngine {
     this.cast = [...opts.cast];
     this.countTokens = opts.countTokens;
     this.budget = opts.budget ?? BUDGET_TOKENS;
-    this.register = REGISTERS[opts.register ?? DEFAULT_REGISTER] ?? REGISTERS[DEFAULT_REGISTER];
+    this.register = REGISTERS[opts.register ?? DEFAULT_REGISTER] ?? REGISTERS[DEFAULT_REGISTER]!;
   }
 
   // ---- memory ------------------------------------------------------------ //
@@ -103,6 +103,7 @@ export class TheaterEngine {
       const victim = this.memory.findIndex((b) => !b.pinned && b.id !== beat.id);
       if (victim === -1) break;
       const [dropped] = this.memory.splice(victim, 1);
+      if (!dropped) break;
       this.forgotten.push(dropped);
       this.lastForgotten.push(dropped);
     }
@@ -120,7 +121,9 @@ export class TheaterEngine {
   // ---- turn order -------------------------------------------------------- //
 
   nextSpeaker(): Character {
-    return this.cast[this.turn % this.cast.length];
+    const speaker = this.cast[this.turn % this.cast.length];
+    if (!speaker) throw new Error('cast must contain at least one actor');
+    return speaker;
   }
 
   // ---- streaming-friendly API -------------------------------------------- //
@@ -212,12 +215,16 @@ export class TheaterEngine {
 
     const entries = [...bySpeaker.entries()]
       .filter(([, beats]) => beats.length >= 2)
-      .map(([speaker, beats]) => ({
-        speaker,
-        emoji: beats[0].emoji,
-        first: beats[0].text,
-        last: beats[beats.length - 1].text,
-      }));
+      .map(([speaker, beats]) => {
+        const first = beats[0]!;
+        const last = beats[beats.length - 1]!;
+        return {
+          speaker,
+          emoji: first.emoji,
+          first: first.text,
+          last: last.text,
+        };
+      });
 
     return {
       entries,
@@ -249,7 +256,7 @@ export function cleanOutput(raw: string, speakerName: string): string {
   // (observed: "SUIT: Queue up..."). Strip any leading shouty label.
   text = text.replace(/^\s*[>"'“”[(]*\s*[A-Z][A-Z' .]{1,20}:\s*/, '');
 
-  if (text.length >= 2 && /["'“”]/.test(text[0]) && /["'“”]/.test(text[text.length - 1])) {
+  if (text.length >= 2 && /["'“”]/.test(text[0]!) && /["'“”]/.test(text[text.length - 1]!)) {
     text = text.slice(1, -1).trim();
   }
 
@@ -261,7 +268,7 @@ export function cleanOutput(raw: string, speakerName: string): string {
     .join('\n')
     .trim();
 
-  if (text && !'.!?…"\'’”*)'.includes(text[text.length - 1])) {
+  if (text && !'.!?…"\'’”*)'.includes(text[text.length - 1]!)) {
     const cut = Math.max(text.lastIndexOf('.'), text.lastIndexOf('!'), text.lastIndexOf('?'));
     if (cut >= 40) text = text.slice(0, cut + 1).trim();
   }

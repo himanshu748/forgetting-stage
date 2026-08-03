@@ -171,7 +171,7 @@ test('validates inputs before invoking a completion', async () => {
   await assert.rejects(
     runMatchedExperiment({
       premise: 'valid',
-      cast: [CAST[0], { ...CAST[0] }],
+      cast: [CAST[0]!, { ...CAST[0]! }],
       rounds: 1,
       countTokens: countWords,
       complete: recordedCompletion,

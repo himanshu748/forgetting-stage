@@ -36,7 +36,7 @@ test('opening seeds the premise and the cast into memory', () => {
   e.prepareOpening('a wedding');
   const seeds = e.memory.filter((b) => b.kind === 'seed');
   assert.equal(seeds.length, 1 + CAST.length, 'premise plus one seed per cast member');
-  assert.equal(seeds[0].text, 'a wedding');
+  assert.equal(seeds[0]!.text, 'a wedding');
   assert.ok(e.memoryTokens() > 0, 'seeds must consume budget');
 });
 
@@ -57,7 +57,7 @@ test('seeds are evicted first, so the troupe forgets what the play is', () => {
     e.commitBeat(speaker, `Line ${i} carrying a good number of extra words to burn budget.`);
   }
   assert.ok(e.forgotten.length > 0, 'expected eviction');
-  assert.equal(e.forgotten[0].kind, 'seed', 'the oldest beat is a seed, so it goes first');
+  assert.equal(e.forgotten[0]!.kind, 'seed', 'the oldest beat is a seed, so it goes first');
 });
 
 test('oldest beat is evicted once over budget', () => {
