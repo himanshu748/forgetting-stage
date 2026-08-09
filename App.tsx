@@ -35,18 +35,24 @@ import { createLiveGenerator } from './src/live/client.ts';
 import {
   canStartPerformance,
   consumePerformance,
+  grantEncore,
   ledgerFromState,
   normalizeDailyPass,
   type DailyPassState,
 } from './src/monetization/daily-pass.ts';
 import {
   createRevenueCatClient,
+  isEncorePackage,
   type DirectorPackage,
   type MonetizationStatus,
 } from './src/monetization/revenuecat.ts';
+import {
+  canOfferPurchase,
+  momentForScreen,
+  shouldShowHouseAd,
+  type Screen,
+} from './src/monetization/showtime.ts';
 import { createLedgerStorage } from './src/monetization/storage.ts';
-
-type Screen = 'lobby' | 'stage' | 'drift';
 
 const performanceProvider = createPerformanceProvider(createLiveGenerator());
 const ledgerStorage = createLedgerStorage(() => import('@react-native-async-storage/async-storage'));
@@ -216,12 +222,16 @@ function Lobby({
                 {pass?.unlimited
                   ? 'Unlimited performances are unlocked.'
                   : pass && pass.remaining < 1
-                    ? 'Today’s free AI performance is spent. Your curtain refreshes at local midnight.'
+                    ? pass.encores > 0
+                      ? `Today’s free performance is spent. ${pass.encores} encore${pass.encores > 1 ? 's' : ''} waiting.`
+                      : 'Today’s free AI performance is spent. Your curtain refreshes at local midnight.'
                     : 'One complete AI performance is free every day.'}
               </Text>
             </View>
             <ActionButton
-              label={pass?.unlimited || (pass?.remaining ?? 1) > 0 ? 'Raise the curtain' : "Unlock Director's Pass"}
+              label={!pass || canStartPerformance(pass)
+                ? pass && pass.remaining < 1 && !pass.unlimited ? 'Use an encore' : 'Raise the curtain'
+                : 'See tonight’s options'}
               onPress={() => {
                 if (!pass || canStartPerformance(pass)) void onStart(choice);
                 else onShowPaywall();
@@ -475,26 +485,37 @@ function Paywall({
   onPurchase: (pkg: DirectorPackage) => void;
   onRestore: () => void;
 }) {
-  const pkg = status.packages[0];
+  // Two things are for sale and they are not alternatives: the encore is one
+  // more show tonight, the pass is every show forever.
+  const encore = status.packages.find(isEncorePackage);
+  const pass = status.packages.find((item) => !isEncorePackage(item));
   return (
     <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
       <View style={styles.modalShade}>
         <View style={styles.paywallCard}>
-          <Text style={styles.paywallKicker}>THE DIRECTOR'S PASS</Text>
+          <Text style={styles.paywallKicker}>THE BOX OFFICE</Text>
           <Text style={styles.paywallTitle}>The curtain never has to close.</Text>
-          <Text style={styles.paywallBody}>Unlock unlimited AI performances and premium director controls while supporting the experiment.</Text>
+          <Text style={styles.paywallBody}>One performance is free every day. Buy a single encore for tonight, or the pass for every night.</Text>
           <View style={styles.paywallBenefits}>
             <Text style={styles.paywallBenefit}>◆ Unlimited performances</Text>
-            <Text style={styles.paywallBenefit}>◆ Every premise, every day</Text>
+            <Text style={styles.paywallBenefit}>◆ No house ad at the curtain</Text>
             <Text style={styles.paywallBenefit}>◆ Restore access across supported devices</Text>
           </View>
-          {pkg ? (
+          {encore && (
             <ActionButton
-              label={busy ? 'Contacting the box office...' : `Unlock for ${pkg.price || 'the listed price'}`}
+              label={busy ? 'Contacting the box office...' : `One encore for ${encore.price || 'the listed price'}`}
+              variant="ghost"
               disabled={busy}
-              onPress={() => onPurchase(pkg)}
+              onPress={() => onPurchase(encore)}
             />
-          ) : (
+          )}
+          {pass ? (
+            <ActionButton
+              label={busy ? 'Contacting the box office...' : `Director's Pass for ${pass.price || 'the listed price'}`}
+              disabled={busy}
+              onPress={() => onPurchase(pass)}
+            />
+          ) : encore ? null : (
             <Text style={styles.paywallUnavailable}>
               {status.configured
                 ? 'The current RevenueCat offering has no package yet.'
@@ -510,7 +531,29 @@ function Paywall({
   );
 }
 
-function Drift({ session, onReplay, onNewPlay }: { session: GameSession; onReplay: () => void; onNewPlay: () => void }) {
+function HouseAd() {
+  return (
+    <View style={styles.houseAd}>
+      <Text style={styles.houseAdKicker}>THE INTERVAL IS SPONSORED</Text>
+      <Text style={styles.houseAdCopy}>
+        The interval belongs to the house. The performance never does. The Director's Pass
+        removes this card for good.
+      </Text>
+    </View>
+  );
+}
+
+function Drift({
+  session,
+  houseAd,
+  onReplay,
+  onNewPlay,
+}: {
+  session: GameSession;
+  houseAd: boolean;
+  onReplay: () => void;
+  onNewPlay: () => void;
+}) {
   const drift = session.engine.drift();
   const pinned = drift.survived[0];
   return (
@@ -562,6 +605,8 @@ function Drift({ session, onReplay, onNewPlay }: { session: GameSession; onRepla
           ))}
         </View>
 
+        {houseAd && <HouseAd />}
+
         <View style={styles.driftActions}>
           <ActionButton label="Perform again" onPress={onReplay} />
           <ActionButton label="Choose another disaster" variant="ghost" onPress={onNewPlay} />
@@ -602,6 +647,13 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
+  // The one rule the whole day was about: an offer may never interrupt a
+  // performance, so every route to the paywall goes through here.
+  const showPaywall = () => {
+    if (!canOfferPurchase(momentForScreen(screen))) return;
+    setPaywallVisible(true);
+  };
+
   const transition = (next: Screen) => {
     Animated.timing(fade, {
       toValue: 0,
@@ -628,7 +680,7 @@ export default function App() {
     );
     if (!canStartPerformance(currentPass)) {
       setPass(currentPass);
-      setPaywallVisible(true);
+      showPaywall();
       return;
     }
     const consumed = consumePerformance(currentPass);
@@ -675,7 +727,16 @@ export default function App() {
     setPaywallBusy(true);
     setPaywallError(null);
     try {
-      updateMonetization(await revenueCat.purchase(pkg));
+      const status = await revenueCat.purchase(pkg);
+      updateMonetization(status);
+      // A consumable flips no entitlement, so the extra show is recorded here.
+      if (isEncorePackage(pkg) && !status.unlimited) {
+        const current = normalizeDailyPass(pass ? ledgerFromState(pass) : null, new Date(), status.unlimited);
+        const bought = grantEncore(current);
+        setPass(bought);
+        await ledgerStorage.save(ledgerFromState(bought));
+      }
+      setPaywallVisible(false);
     } catch (error) {
       setPaywallError(error instanceof Error ? error.message : 'Purchase failed');
     } finally {
@@ -713,7 +774,7 @@ export default function App() {
         {screen === 'lobby' && (
           <Lobby
             pass={pass}
-            onShowPaywall={() => setPaywallVisible(true)}
+            onShowPaywall={showPaywall}
             onStart={(choice) => { void start(choice); }}
           />
         )}
@@ -731,7 +792,12 @@ export default function App() {
           />
         )}
         {screen === 'drift' && session && (
-          <Drift session={session} onReplay={replay} onNewPlay={() => transition('lobby')} />
+          <Drift
+            session={session}
+            houseAd={shouldShowHouseAd(momentForScreen(screen), monetization.unlimited)}
+            onReplay={replay}
+            onNewPlay={() => transition('lobby')}
+          />
         )}
       </Animated.View>
       <Paywall
@@ -808,6 +874,9 @@ const styles = StyleSheet.create({
   paywallBenefit: { color: colors.paper, fontSize: 13 },
   paywallUnavailable: { color: colors.gold, fontSize: 12, lineHeight: 18, borderWidth: 1, borderColor: colors.goldSoft, padding: 12 },
   paywallError: { color: colors.ember, fontSize: 11, lineHeight: 16, textAlign: 'center' },
+  houseAd: { borderWidth: 1, borderColor: colors.line, padding: 16, marginBottom: 22, backgroundColor: colors.panelSoft },
+  houseAdKicker: { color: colors.smoke, fontSize: 9, letterSpacing: 1.8, fontWeight: '900' },
+  houseAdCopy: { color: colors.smoke, fontSize: 12, lineHeight: 19, marginTop: 6 },
   stageShell: { flexGrow: 1, paddingHorizontal: '3.5%', paddingTop: 16, paddingBottom: 18, minHeight: '100%' },
   stageHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 18, borderBottomWidth: 1, borderBottomColor: colors.line, paddingBottom: 14 },
   backLabel: { color: colors.smoke, fontSize: 10, letterSpacing: 1.7, fontWeight: '800' },
