@@ -31,6 +31,24 @@ function play(e: TheaterEngine, lines: string[]) {
   }
 }
 
+test('losing a seed queues a probe naming what was lost', () => {
+  // Big enough that the opening fits intact, small enough that beats evict it.
+  const e = engine(60);
+  e.prepareOpening('a wedding where nobody agrees who is marrying whom');
+  e.commitOpening('The hall is full.');
+  assert.equal(e.nextProbe(), null, 'nothing lost yet, nothing to ask about');
+
+  for (let i = 0; i < 4; i += 1) {
+    const { speaker } = e.prepareBeat();
+    e.commitBeat(speaker, `Line ${i} carrying a good number of extra words to burn budget.`);
+  }
+
+  const probe = e.nextProbe();
+  assert.ok(probe, 'an evicted seed must queue a probe');
+  assert.match(probe, /state plainly/i);
+  assert.notEqual(e.nextProbe(), probe, 'a probe is asked once, then consumed');
+});
+
 test('opening seeds the premise and the cast into memory', () => {
   const e = engine(1000);
   e.prepareOpening('a wedding');

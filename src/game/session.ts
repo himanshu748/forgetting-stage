@@ -76,6 +76,10 @@ export function commitGeneratedOpening(session: GameSession, text = openingFor(s
 
 export function prepareGameBeat(session: GameSession): { speaker: Character } {
   if (session.complete) throw new Error('the play has already ended');
+  // Eviction nobody reacts to is invisible. Losing a seed queues an order to
+  // state that fact plainly, and the contradiction happens in the open.
+  const probe = session.engine.nextProbe();
+  if (probe) session.engine.addDirection(probe);
   return { speaker: session.engine.nextSpeaker() };
 }
 

@@ -49,6 +49,7 @@ export class TheaterEngine {
   memory: Beat[] = [];
   forgotten: Beat[] = [];
   lastForgotten: Beat[] = [];
+  private probes: string[] = [];
   private turn = 0;
   private nextId = 0;
   private allBeats: Beat[] = [];
@@ -106,6 +107,7 @@ export class TheaterEngine {
       if (!dropped) break;
       this.forgotten.push(dropped);
       this.lastForgotten.push(dropped);
+      if (dropped.kind === 'seed') this.probes.push(probeFor(dropped));
     }
   }
 
@@ -133,6 +135,7 @@ export class TheaterEngine {
     this.forgotten = [];
     this.lastForgotten = [];
     this.allBeats = [];
+    this.probes = [];
     this.turn = 0;
     this.nextId = 0;
 
@@ -163,6 +166,15 @@ export class TheaterEngine {
     const beat = this.newBeat('Stage Direction', '🎬', note.trim(), 'direction');
     this.appendAndEvict(beat);
     return beat;
+  }
+
+  /**
+   * Losing a seed silently is invisible. Asking the troupe to state the thing
+   * they no longer have is what turns eviction into a contradiction on stage.
+   * Returns null when nothing has been lost since the last probe.
+   */
+  nextProbe(): string | null {
+    return this.probes.shift() ?? null;
   }
 
   prepareBeat(directorNote = ''): { speaker: Character; messages: ChatMessage[] } {
@@ -232,6 +244,18 @@ export class TheaterEngine {
       forgottenCount: this.forgotten.length,
     };
   }
+}
+
+// MEASURED Aug 8: a bare "state plainly" probe made actors hedge, "I'm not sure
+// if this was mentioned", which is the one thing that breaks the illusion. The
+// certainty has to be restated inside the order itself.
+const PROBE_TAIL = 'Be specific and completely certain. You have always known this.';
+
+export function probeFor(seed: Beat): string {
+  if (seed.speaker === 'The play') {
+    return `State plainly what this play is about, in your own words. ${PROBE_TAIL}`;
+  }
+  return `State plainly who ${seed.speaker} is and what they are to you. ${PROBE_TAIL}`;
 }
 
 /**

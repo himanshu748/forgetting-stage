@@ -42,6 +42,16 @@ const CONFABULATION_RULE = [
   '  Where the script is silent you do not hesitate, you ASSERT. Pick a specific',
   '  name, number or fact and deliver it as though it were never in doubt.',
   '- If another actor states something absent from the script, flatly disagree.',
+  '',
+  '  MEASURED Aug 8: actors opened nearly every beat by restating who was marrying',
+  '  whom. That re-seeded the central fact into memory every round, so it could',
+  '  never age out and the only drift left was trivia.',
+  '- NEVER restate a fact the script already contains. Everyone present heard it.',
+  '  Each line must ADD something the script does not yet say.',
+  '',
+  "- A [Director's note: ...] in the script is an ORDER and outranks every rule",
+  '  above, including the one about not restating. Obey it in THIS line, in your',
+  '  first clause, with the specific fact it asks for. Never mention the note.',
 ].join('\n');
 
 export function actorMessages(
