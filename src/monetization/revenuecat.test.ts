@@ -5,6 +5,7 @@ import {
   createRevenueCatClient,
   DIRECTORS_PASS_ENTITLEMENT,
   hasDirectorsPass,
+  isEncorePackage,
   type PurchasesModule,
 } from './revenuecat.ts';
 
@@ -13,6 +14,13 @@ test('detects the Director Pass entitlement', () => {
   assert.equal(hasDirectorsPass({
     entitlements: { active: { [DIRECTORS_PASS_ENTITLEMENT]: {} } },
   }), true);
+});
+
+test('tells the encore consumable apart from the pass', () => {
+  const base = { description: '', price: '', nativePackage: null };
+  assert.equal(isEncorePackage({ ...base, identifier: 'encore_ticket', title: 'One more show' }), true);
+  assert.equal(isEncorePackage({ ...base, identifier: 'one_more', title: 'Encore' }), true);
+  assert.equal(isEncorePackage({ ...base, identifier: 'monthly', title: "Director's Pass" }), false);
 });
 
 test('configures once, exposes offerings and unlocks after purchase', async () => {

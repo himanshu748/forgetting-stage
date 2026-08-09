@@ -3,6 +3,7 @@ export const DAILY_FREE_PERFORMANCES = 1;
 export type DailyPassLedger = {
   dayKey: string;
   used: number;
+  encores?: number;
   lastSeenAt?: string;
 };
 
@@ -10,6 +11,8 @@ export type DailyPassState = {
   dayKey: string;
   used: number;
   remaining: number;
+  /** Bought encores. Unlike the free show these do not expire at midnight. */
+  encores: number;
   unlimited: boolean;
   nextRefreshAt: string;
 };
@@ -40,22 +43,28 @@ export function normalizeDailyPass(
     : clockMovedBack
       ? DAILY_FREE_PERFORMANCES
       : 0;
+  const encores = Number(ledger?.encores ?? 0);
   return {
     dayKey,
     used,
     remaining: unlimited ? Number.POSITIVE_INFINITY : Math.max(0, DAILY_FREE_PERFORMANCES - used),
+    encores: Number.isFinite(encores) ? Math.max(0, Math.trunc(encores)) : 0,
     unlimited,
     nextRefreshAt: nextLocalMidnight(now).toISOString(),
   };
 }
 
 export function canStartPerformance(state: DailyPassState): boolean {
-  return state.unlimited || state.remaining > 0;
+  return state.unlimited || state.remaining > 0 || state.encores > 0;
 }
 
+/** The free show is spent first, so an encore is never wasted while one is left. */
 export function consumePerformance(state: DailyPassState): DailyPassState {
   if (state.unlimited) return state;
-  if (state.remaining < 1) throw new Error('daily performance already used');
+  if (state.remaining < 1) {
+    if (state.encores < 1) throw new Error('daily performance already used');
+    return { ...state, encores: state.encores - 1 };
+  }
   const used = state.used + 1;
   return {
     ...state,
@@ -64,6 +73,15 @@ export function consumePerformance(state: DailyPassState): DailyPassState {
   };
 }
 
+export function grantEncore(state: DailyPassState): DailyPassState {
+  return { ...state, encores: state.encores + 1 };
+}
+
 export function ledgerFromState(state: DailyPassState, now = new Date()): DailyPassLedger {
-  return { dayKey: state.dayKey, used: state.used, lastSeenAt: now.toISOString() };
+  return {
+    dayKey: state.dayKey,
+    used: state.used,
+    encores: state.encores,
+    lastSeenAt: now.toISOString(),
+  };
 }

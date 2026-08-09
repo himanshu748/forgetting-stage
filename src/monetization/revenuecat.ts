@@ -43,6 +43,15 @@ export function hasDirectorsPass(info: PurchasesCustomerInfo): boolean {
   return Boolean(info.entitlements?.active?.[DIRECTORS_PASS_ENTITLEMENT]);
 }
 
+/**
+ * The encore is a consumable, so it grants no entitlement and the customer info
+ * comes back unchanged. It is recognised by its identifier instead, and the one
+ * extra performance is written to the local ledger.
+ */
+export function isEncorePackage(pkg: DirectorPackage): boolean {
+  return `${pkg.identifier} ${pkg.title}`.toLowerCase().includes('encore');
+}
+
 function publicKeyForPlatform(platform: string, env: Record<string, string | undefined>): string | null {
   if (env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY) return env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY;
   if (platform === 'ios') return env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ?? null;
