@@ -3,6 +3,7 @@ import type { GenerationRequest, GenerationResponse } from './contract.ts';
 export type LiveGenerator = (request: GenerationRequest) => Promise<string>;
 
 export type LiveGeneratorOptions = {
+  platform: string;
   endpoint?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -18,12 +19,24 @@ export class LiveGenerationError extends Error {
   }
 }
 
-export function createLiveGenerator(options: LiveGeneratorOptions = {}): LiveGenerator {
+function isConfiguredNativeEndpoint(platform: string, endpoint: string | undefined): boolean {
+  if (platform !== 'ios' && platform !== 'android') return true;
+  try {
+    return new URL(endpoint ?? '').protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+export function createLiveGenerator(options: LiveGeneratorOptions): LiveGenerator {
   const endpoint = options.endpoint ?? '/api/generate';
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 20_000;
 
   return async (request) => {
+    if (!isConfiguredNativeEndpoint(options.platform, options.endpoint)) {
+      throw new LiveGenerationError('Live generation is not configured for this build', 'unconfigured');
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {

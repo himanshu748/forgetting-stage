@@ -17,7 +17,7 @@
     "experiment": "node --env-file-if-exists=../forgetting-stage-notes/.env --experimental-strip-types src/experiments/run.ts"
   },
   "dependencies": {
-    "@react-native-async-storage/async-storage": "^3.1.1",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.9",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",

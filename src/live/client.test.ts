@@ -6,6 +6,7 @@ import { createLiveGenerator, LiveGenerationError } from './client.ts';
 test('posts the public generation contract and returns text', async () => {
   let sent = '';
   const generate = createLiveGenerator({
+    platform: 'ios',
     endpoint: 'https://example.test/api/generate',
     fetchImpl: async (_url, init) => {
       sent = String(init?.body);
@@ -22,6 +23,7 @@ test('posts the public generation contract and returns text', async () => {
 
 test('normalizes server failures into a typed client error', async () => {
   const generate = createLiveGenerator({
+    platform: 'web',
     fetchImpl: async () => new Response(JSON.stringify({
       error: 'Too many generation requests',
       code: 'rate_limited',
@@ -31,4 +33,25 @@ test('normalizes server failures into a typed client error', async () => {
     generate({ kind: 'opening', premiseId: 'wedding', performanceId: 'performance-1' }),
     (error: unknown) => error instanceof LiveGenerationError && error.code === 'rate_limited',
   );
+});
+
+test('rejects unconfigured native endpoints before invoking fetch', async () => {
+  for (const endpoint of [undefined, '/api/generate', 'http://example.test/api/generate']) {
+    let fetchCalls = 0;
+    const generate = createLiveGenerator({
+      platform: 'android',
+      endpoint,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error('fetch must not run');
+      },
+    });
+    await assert.rejects(
+      generate({ kind: 'opening', premiseId: 'wedding', performanceId: 'performance-1' }),
+      (error: unknown) => error instanceof LiveGenerationError
+        && error.code === 'unconfigured'
+        && error.message === 'Live generation is not configured for this build',
+    );
+    assert.equal(fetchCalls, 0, `fetch was invoked for ${endpoint ?? 'an absent endpoint'}`);
+  }
 });

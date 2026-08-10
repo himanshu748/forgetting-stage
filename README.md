@@ -35,7 +35,13 @@ The mobile client calls the narrow `POST /api/generate` contract. The server val
 HF_TOKEN=hf_xxx MODEL=meta-llama/Llama-3.1-8B-Instruct npx vercel dev
 ```
 
-Deploy the Expo web output and `api/generate.ts` on a host that supports TypeScript serverless functions, or place the same handler behind your mobile API domain. Never prefix `HF_TOKEN` with `EXPO_PUBLIC_`.
+Deploy the Expo web output and `api/generate.ts` on a host that supports TypeScript serverless functions, or place the same handler behind your mobile API domain. Web can use its same-origin `/api/generate` route; iOS and Android require an absolute HTTPS URL for the deployed gateway:
+
+```bash
+EXPO_PUBLIC_GENERATION_ENDPOINT=https://api.example.com/api/generate
+```
+
+Never prefix `HF_TOKEN` with `EXPO_PUBLIC_`.
 
 ## RevenueCat and the daily curtain
 
@@ -53,6 +59,8 @@ EXPO_PUBLIC_REVENUECAT_TEST_API_KEY=test_xxx
 EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=appl_xxx
 EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=goog_xxx
 ```
+
+These are RevenueCat public SDK keys intended for the app bundle, not secret RevenueCat API keys. Never put a secret API key in an `EXPO_PUBLIC_` variable.
 
 The one-free-performance ledger is stored locally and resets on the next local calendar day. Director's Pass holders bypass the ledger. RevenueCat's Test Store can simulate success, failure and cancellation, but real native purchase testing requires an Expo development build rather than ordinary Expo Go. Never ship a Test Store API key in a production build.
 

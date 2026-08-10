@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 
 import type { Beat } from './src/engine/types.ts';
+import { readPublicConfig, resolveGenerationEndpoint } from './src/config/public.ts';
 import { CAST, PREMISES, type PremiseOption } from './src/game/content.ts';
 import {
   createPerformanceProvider,
@@ -54,10 +55,15 @@ import {
 } from './src/monetization/showtime.ts';
 import { createLedgerStorage } from './src/monetization/storage.ts';
 
-const performanceProvider = createPerformanceProvider(createLiveGenerator());
+const publicConfig = readPublicConfig();
+const performanceProvider = createPerformanceProvider(createLiveGenerator({
+  platform: Platform.OS,
+  endpoint: resolveGenerationEndpoint(Platform.OS, publicConfig.generationEndpoint),
+}));
 const ledgerStorage = createLedgerStorage(() => import('@react-native-async-storage/async-storage'));
 const revenueCat = createRevenueCatClient({
   platform: Platform.OS,
+  publicKeys: publicConfig.revenueCat,
   loadPurchases: () => import('react-native-purchases'),
 });
 const emptyMonetization: MonetizationStatus = {
