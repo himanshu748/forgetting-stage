@@ -16,6 +16,15 @@ export type Character = {
   name: string;
   emoji: string;
   persona: string;
+  /** Delivery cues only; identity facts stay in shared-memory persona seeds. */
+  style?: string;
+};
+
+export type MemoryProbe = {
+  lostSeed: Beat;
+  instruction: string;
+  responseIndex: number;
+  responseCount: number;
 };
 
 export type ChatMessage = {

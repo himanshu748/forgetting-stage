@@ -11,17 +11,20 @@ export const CAST: Character[] = [
   {
     name: 'Meera',
     emoji: 'M',
-    persona: 'the bride, brisk and certain of everything',
+    persona: 'the bride',
+    style: 'brisk and certain of everything',
   },
   {
     name: 'Arun',
     emoji: 'A',
-    persona: 'the groom, romantic and permanently one step behind',
+    persona: 'the groom',
+    style: 'romantic and permanently one step behind',
   },
   {
     name: 'Auntie',
     emoji: 'T',
-    persona: 'an aunt with loud opinions and a private version of every family story',
+    persona: 'an aunt in the family',
+    style: 'loudly opinionated, with a private version of every family story',
   },
 ];
 

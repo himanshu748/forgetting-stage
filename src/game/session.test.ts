@@ -8,9 +8,11 @@ import {
   addDirectorNote,
   advanceGameSession,
   canFinish,
+  commitGeneratedBeat,
   createGameSession,
   finishGameSession,
   pinBeat,
+  prepareGameBeat,
   snapshotSession,
 } from './session.ts';
 
@@ -78,4 +80,81 @@ test('finishes only after the configured rounds and exposes drift', () => {
   assert.equal(snapshot.canAdvance, false);
   assert.equal(session.engine.drift().entries.length, 3);
   assert.throws(() => advanceGameSession(session), /already ended/);
+});
+
+test('records two consecutive actor replacements against the same evicted seed', () => {
+  const session = createGameSession(premise.id, premise.premise);
+  for (let i = 0; i < 13; i += 1) advanceGameSession(session);
+
+  const first = prepareGameBeat(session);
+  assert.ok(first.probe, 'the next normal turn must surface the seed eviction');
+  assert.equal(first.probe.responseIndex, 1);
+  assert.equal(first.probe.responseCount, 2);
+  assert.equal(snapshotSession(session).directorNoteUsed, false, 'an automatic probe is not a user note');
+  assert.ok(session.pendingForgotten.length > 0, 'direction-triggered evictions must be retained');
+
+  commitGeneratedBeat(session, first.speaker, 'The wedding belongs to Kavya and Dev beneath the west veranda.');
+  let snapshot = snapshotSession(session);
+  assert.equal(snapshot.contradictions.length, 1);
+  assert.equal(snapshot.contradictions[0]!.lostSeed.id, first.probe.lostSeed.id);
+  assert.deepEqual(snapshot.contradictions[0]!.responses, [
+    {
+      speaker: first.speaker.name,
+      emoji: first.speaker.emoji,
+      text: 'The wedding belongs to Kavya and Dev beneath the west veranda.',
+    },
+  ]);
+  assert.equal(snapshot.contradictions[0]!.complete, false);
+
+  const second = prepareGameBeat(session);
+  assert.ok(second.probe);
+  assert.equal(second.probe.responseIndex, 2);
+  assert.equal(second.probe.lostSeed.id, first.probe.lostSeed.id);
+  assert.notEqual(second.speaker.name, first.speaker.name);
+  commitGeneratedBeat(session, second.speaker, 'This ceremony celebrates Naina marrying Mihir on the palace roof.');
+
+  snapshot = snapshotSession(session);
+  assert.equal(snapshot.contradictions.length, 1, 'responses group by lost seed id');
+  assert.equal(snapshot.contradictions[0]!.responses.length, 2);
+  assert.equal(snapshot.contradictions[0]!.responses[1]!.speaker, second.speaker.name);
+  assert.equal(snapshot.contradictions[0]!.complete, true);
+});
+
+test('aggregates automatic-direction and generated-line evictions', () => {
+  const session = createGameSession(premise.id, premise.premise);
+  for (let i = 0; i < 13; i += 1) advanceGameSession(session);
+  const prepared = prepareGameBeat(session);
+  assert.ok(prepared.probe);
+  const directionEvictions = session.pendingForgotten.map((beat) => beat.id);
+  assert.ok(directionEvictions.length > 0);
+
+  commitGeneratedBeat(
+    session,
+    prepared.speaker,
+    'This exceptionally elaborate replacement carries enough confident ceremonial detail to force another old remembered line entirely beyond the shared stage memory tonight.',
+  );
+  const lineEvictions = session.engine.lastForgotten.map((beat) => beat.id);
+  assert.ok(lineEvictions.length > 0);
+  assert.deepEqual(
+    snapshotSession(session).lastForgotten.map((beat) => beat.id),
+    [...directionEvictions, ...lineEvictions],
+  );
+});
+
+test('snapshot contradiction values are defensively copied at every nested level', () => {
+  const session = createGameSession(premise.id, premise.premise);
+  for (let i = 0; i < 13; i += 1) advanceGameSession(session);
+  const prepared = prepareGameBeat(session);
+  assert.ok(prepared.probe);
+  commitGeneratedBeat(session, prepared.speaker, 'Kavya owns this ceremony and the entire western garden.');
+
+  const first = snapshotSession(session);
+  const originalSeed = first.contradictions[0]!.lostSeed.text;
+  const originalResponse = first.contradictions[0]!.responses[0]!.text;
+  first.contradictions[0]!.lostSeed.text = 'mutated seed';
+  first.contradictions[0]!.responses[0]!.text = 'mutated response';
+
+  const second = snapshotSession(session);
+  assert.equal(second.contradictions[0]!.lostSeed.text, originalSeed);
+  assert.equal(second.contradictions[0]!.responses[0]!.text, originalResponse);
 });

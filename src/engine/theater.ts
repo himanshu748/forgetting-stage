@@ -29,6 +29,7 @@ import {
   type ChatMessage,
   type CountTokens,
   type Drift,
+  type MemoryProbe,
 } from './types.ts';
 
 export function scriptLine(beat: Beat): string {
@@ -49,7 +50,7 @@ export class TheaterEngine {
   memory: Beat[] = [];
   forgotten: Beat[] = [];
   lastForgotten: Beat[] = [];
-  private probes: string[] = [];
+  private probes: MemoryProbe[] = [];
   private turn = 0;
   private nextId = 0;
   private allBeats: Beat[] = [];
@@ -107,7 +108,17 @@ export class TheaterEngine {
       if (!dropped) break;
       this.forgotten.push(dropped);
       this.lastForgotten.push(dropped);
-      if (dropped.kind === 'seed') this.probes.push(probeFor(dropped));
+      if (dropped.kind === 'seed') {
+        const instruction = probeFor(dropped);
+        for (let responseIndex = 1; responseIndex <= 2; responseIndex += 1) {
+          this.probes.push({
+            lostSeed: { ...dropped },
+            instruction,
+            responseIndex,
+            responseCount: 2,
+          });
+        }
+      }
     }
   }
 
@@ -173,8 +184,9 @@ export class TheaterEngine {
    * they no longer have is what turns eviction into a contradiction on stage.
    * Returns null when nothing has been lost since the last probe.
    */
-  nextProbe(): string | null {
-    return this.probes.shift() ?? null;
+  nextProbe(): MemoryProbe | null {
+    const probe = this.probes.shift();
+    return probe ? { ...probe, lostSeed: { ...probe.lostSeed } } : null;
   }
 
   prepareBeat(directorNote = ''): { speaker: Character; messages: ChatMessage[] } {

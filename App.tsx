@@ -173,7 +173,7 @@ function Lobby({
             <Text style={styles.eyebrow}>TONIGHT'S PERFORMANCE</Text>
             <Text style={styles.heroTitle}>One memory.{`\n`}Three certainties.{`\n`}No second chances.</Text>
             <Text style={styles.heroBody}>
-              An AI cast improvises inside a memory that holds only 1,000 tokens. Save one line. Watch everything else become negotiable.
+              An AI cast improvises inside a deliberately small shared memory. Save one line. Watch everything else become negotiable.
             </Text>
             <View style={styles.rulesBox}>
               <Rule number="01" title="Direct the play" copy="Choose the premise and intervene when the story needs a dangerous nudge." />
@@ -340,6 +340,7 @@ function Stage({
   const compact = width < 880;
   const feed = snapshot.memory.filter((beat) => beat.kind !== 'seed');
   const canPin = snapshot.pinnedCount === 0;
+  const contradiction = snapshot.contradictions[snapshot.contradictions.length - 1];
   const progress = Math.min(DEMO_ROUNDS, snapshot.round);
   const actionLabel = snapshot.canAdvance
     ? `${snapshot.nextSpeaker?.name ?? 'Actor'} steps forward`
@@ -399,9 +400,62 @@ function Stage({
                     <Text style={styles.evictionKicker}>MEMORY EVICTED</Text>
                     {snapshot.lastForgotten.map((beat) => (
                       <Text key={beat.id} style={styles.evictionText} numberOfLines={2}>
-                        {beat.kind === 'seed' ? 'Identity lost' : beat.speaker}: {beat.text}
+                        {beat.kind === 'seed'
+                          ? beat.speaker === 'The play' ? 'Premise forgotten' : 'Character fact forgotten'
+                          : beat.speaker}: {beat.text}
                       </Text>
                     ))}
+                  </View>
+                )}
+                {contradiction && (
+                  <View
+                    style={styles.contradictionCard}
+                    accessible
+                    accessibilityRole="summary"
+                    accessibilityLiveRegion="polite"
+                    accessibilityLabel={[
+                      `Memory erased: ${contradiction.lostSeed.speaker}, ${contradiction.lostSeed.text}.`,
+                      contradiction.responses[0]
+                        ? `Replacement one from ${contradiction.responses[0].speaker}: ${contradiction.responses[0].text}.`
+                        : 'Waiting for the first actor.',
+                      contradiction.responses[1]
+                        ? `Replacement two from ${contradiction.responses[1].speaker}: ${contradiction.responses[1].text}.`
+                        : 'Waiting for the next actor.',
+                    ].join(' ')}
+                  >
+                    <View style={styles.contradictionHeader}>
+                      <Text style={styles.contradictionKicker}>FORGETTING CHAIN</Text>
+                      <Text style={styles.contradictionStatus}>
+                        {contradiction.complete ? 'TWO REPLACEMENTS RECORDED' : 'WAITING FOR THE NEXT ACTOR'}
+                      </Text>
+                    </View>
+                    <View style={styles.contradictionStep}>
+                      <Text style={styles.contradictionNumber}>1</Text>
+                      <View style={styles.contradictionCopy}>
+                        <Text style={styles.contradictionLabel}>
+                          {contradiction.lostSeed.speaker === 'The play'
+                            ? 'PREMISE ERASED'
+                            : `${contradiction.lostSeed.speaker.toUpperCase()} FACT ERASED`}
+                        </Text>
+                        <Text style={styles.contradictionText}>{contradiction.lostSeed.text}</Text>
+                      </View>
+                    </View>
+                    {[0, 1].map((index) => {
+                      const response = contradiction.responses[index];
+                      return (
+                        <View key={index} style={styles.contradictionStep}>
+                          <Text style={styles.contradictionNumber}>{index + 2}</Text>
+                          <View style={styles.contradictionCopy}>
+                            <Text style={styles.contradictionLabel}>
+                              {response ? `${response.emoji} ${response.speaker} REPLACED IT` : 'REPLACEMENT PENDING'}
+                            </Text>
+                            <Text style={[styles.contradictionText, !response && styles.contradictionWaiting]}>
+                              {response?.text ?? 'waiting for the next actor'}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
                   </View>
                 )}
               </ScrollView>
@@ -923,6 +977,16 @@ const styles = StyleSheet.create({
   evictionNotice: { borderWidth: 1, borderColor: '#683226', backgroundColor: '#21110e', padding: 14, marginTop: 4 },
   evictionKicker: { color: colors.ember, fontSize: 9, letterSpacing: 1.7, fontWeight: '900', marginBottom: 7 },
   evictionText: { color: '#c99b8e', fontSize: 12, lineHeight: 18, textDecorationLine: 'line-through' },
+  contradictionCard: { borderWidth: 2, borderColor: colors.gold, backgroundColor: '#17130c', padding: 14, marginTop: 4 },
+  contradictionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: colors.goldSoft, paddingBottom: 10, marginBottom: 4 },
+  contradictionKicker: { color: colors.gold, fontSize: 10, letterSpacing: 1.8, fontWeight: '900' },
+  contradictionStatus: { color: colors.paper, fontSize: 8, lineHeight: 12, letterSpacing: 1, fontWeight: '900', textAlign: 'right', flex: 1 },
+  contradictionStep: { flexDirection: 'row', gap: 11, borderBottomWidth: 1, borderBottomColor: colors.line, paddingVertical: 10 },
+  contradictionNumber: { width: 22, height: 22, borderRadius: 11, overflow: 'hidden', textAlign: 'center', lineHeight: 22, backgroundColor: colors.ember, color: '#fff8ef', fontSize: 10, fontWeight: '900' },
+  contradictionCopy: { flex: 1 },
+  contradictionLabel: { color: colors.gold, fontSize: 8, letterSpacing: 1.2, fontWeight: '900', marginBottom: 4 },
+  contradictionText: { color: colors.paper, fontSize: 13, lineHeight: 19, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
+  contradictionWaiting: { color: colors.smoke, fontStyle: 'italic' },
   controlPanel: { width: 360, maxWidth: '100%', alignSelf: 'stretch', backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, padding: 17, gap: 16 },
   meterLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 },
   meterTitle: { color: colors.paper, fontSize: 9, letterSpacing: 1.7, fontWeight: '900' },

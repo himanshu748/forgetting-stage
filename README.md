@@ -1,15 +1,16 @@
 # The Forgetting Stage
 
-**A story machine where an AI cast improvises a play inside a real 1,000 token memory,
+**A story machine where an AI cast improvises a play inside a deliberately small shared memory,
 and you choose the one thing they are allowed to keep.**
 
 Successor to [Thousand-Token Theater](https://huggingface.co/spaces/build-small-hackathon/thousand-token-theater),
 which won the Build Small Hackathon. Entry for RevenueCat Shipaton 2026.
 
-The cast shares a genuine 1,000 token memory. As the play runs the oldest beats fall
-out, and the actors carry on regardless, confidently inventing replacements for whatever
-they have lost. You get one pin. The comedy is the contrast: one fact stubbornly
-survives while everything around it rots.
+The cast shares a bounded memory. As the play runs the oldest beats fall out, and the
+next two actors receive the same structured probe about a genuinely erased seed. Each
+supplies a visible, confident replacement, and the stage groups both answers with the
+lost fact so the contradiction has a clear cause. You get one pin. The comedy is the
+contrast: one fact stubbornly survives while everything around it rots.
 
 There is no goal and no way to lose. It is a machine for producing funny disasters, and
 the player composes rather than competes.
@@ -72,9 +73,9 @@ The deterministic test suite needs no API key. Live spikes, plays and experiment
 npm test
 ```
 
-Proves the 1,000 token cap and the pin mechanic against a mock model. 7 tests, no
-network. The engine takes `countTokens` and the model as injected dependencies, so
-eviction is verifiable without inference.
+Proves the configured memory cap, pin mechanic and two-response probe chain with no
+network. The engine takes `countTokens` as an injected dependency, so eviction is
+verifiable without claiming that every production model tokenizer measures text identically.
 
 ```bash
 HF_TOKEN=hf_xxx npm run spike
@@ -86,7 +87,7 @@ The go/no-go check described below. Optionally set `MODEL` to compare candidates
 HF_TOKEN=hf_xxx npm run experiment
 ```
 
-Runs a matched backend experiment with two arms: the normal 1,000-token memory and a control where eviction is effectively disabled. Both arms use the same premise, cast, rounds and completion contract. The command prints a comparison report and writes structured JSON to `artifacts/latest-experiment.json`.
+Runs a matched backend experiment with two arms: the configured bounded memory and a control where eviction is effectively disabled. Both arms use the same premise, cast, rounds and completion contract. The command prints a comparison report and writes structured JSON to `artifacts/latest-experiment.json`.
 
 Configure it with `ROUNDS`, `BUDGET`, `CONTROL_BUDGET`, `PREMISE`, `MODEL` and `OUTPUT`. Experiment artifacts are local and ignored by Git.
 
