@@ -92,3 +92,27 @@ test('live probe request carries the direction without restoring persona in the 
   assert.doesNotMatch(system.content, new RegExp(speaker.persona, 'i'));
   assert.match(script, /completely certain/i);
 });
+
+test('a Director note attempt is safely rejected while live actor generation is pending', async () => {
+  let resolveBeat: ((text: string) => void) | undefined;
+  const provider = createPerformanceProvider((request) => {
+    if (request.kind === 'opening') return Promise.resolve('A live opening.');
+    if (request.kind === 'curtain') return Promise.resolve('A live curtain.');
+    return new Promise<string>((resolve) => { resolveBeat = resolve; });
+  });
+  const performance = createPerformanceSession('wedding', 'a wedding');
+  await provider.open(performance);
+
+  const pendingAdvance = provider.advance(performance);
+  let directionResult: unknown;
+  assert.doesNotThrow(() => {
+    directionResult = provider.direction(performance, 'Reveal the secret bride immediately.');
+  });
+  assert.equal(directionResult, null, 'pending actor work must reject the note without throwing');
+  assert.equal(snapshotSession(performance.session).directorNoteUsed, false);
+
+  assert.ok(resolveBeat, 'live beat generation must be waiting');
+  resolveBeat('The live actor completes exactly one line.');
+  await pendingAdvance;
+  assert.equal(snapshotSession(performance.session).turnInRound, 1);
+});

@@ -189,6 +189,10 @@ export class TheaterEngine {
     return probe ? { ...probe, lostSeed: { ...probe.lostSeed } } : null;
   }
 
+  pendingProbeCount(): number {
+    return this.probes.length;
+  }
+
   prepareBeat(directorNote = ''): { speaker: Character; messages: ChatMessage[] } {
     const note = directorNote.trim();
     if (note) this.addDirection(note);

@@ -340,7 +340,9 @@ function Stage({
   const compact = width < 880;
   const feed = snapshot.memory.filter((beat) => beat.kind !== 'seed');
   const canPin = snapshot.pinnedCount === 0;
-  const contradiction = snapshot.contradictions[snapshot.contradictions.length - 1];
+  const forgettingDisplay = snapshot.forgettingDisplay;
+  const contradiction = forgettingDisplay?.contradiction;
+  const directionDisabled = snapshot.directorNoteUsed || busy || snapshot.actorResponsePending;
   const progress = Math.min(DEMO_ROUNDS, snapshot.round);
   const actionLabel = snapshot.canAdvance
     ? `${snapshot.nextSpeaker?.name ?? 'Actor'} steps forward`
@@ -348,7 +350,7 @@ function Stage({
 
   const submitDirection = () => {
     const value = note.trim();
-    if (!value || snapshot.directorNoteUsed) return;
+    if (!value || directionDisabled) return;
     onDirection(value);
     setNote('');
   };
@@ -395,16 +397,14 @@ function Stage({
                 {feed.map((beat) => (
                   <BeatCard key={beat.id} beat={beat} canPin={canPin} onPin={onPin} />
                 ))}
-                {snapshot.lastForgotten.length > 0 && (
+                {forgettingDisplay && (
                   <View style={styles.evictionNotice} accessible accessibilityLiveRegion="polite">
-                    <Text style={styles.evictionKicker}>MEMORY EVICTED</Text>
-                    {snapshot.lastForgotten.map((beat) => (
-                      <Text key={beat.id} style={styles.evictionText} numberOfLines={2}>
-                        {beat.kind === 'seed'
-                          ? beat.speaker === 'The play' ? 'Premise forgotten' : 'Character fact forgotten'
-                          : beat.speaker}: {beat.text}
-                      </Text>
-                    ))}
+                    <Text style={styles.evictionKicker}>MEMORY THAT CAUSED THIS CHAIN</Text>
+                    <Text style={styles.evictionText} numberOfLines={2}>
+                      {forgettingDisplay.forgotten.speaker === 'The play'
+                        ? 'Premise forgotten'
+                        : 'Character fact forgotten'}: {forgettingDisplay.forgotten.text}
+                    </Text>
                   </View>
                 )}
                 {contradiction && (
@@ -458,6 +458,18 @@ function Stage({
                     })}
                   </View>
                 )}
+                {forgettingDisplay && forgettingDisplay.cascading.length > 0 && (
+                  <View style={styles.queuedEvictions} accessible accessibilityLiveRegion="polite">
+                    <Text style={styles.queuedEvictionsKicker}>NEW MEMORY LOSSES THIS TURN</Text>
+                    {forgettingDisplay.cascading.map((beat) => (
+                      <Text key={beat.id} style={styles.queuedEvictionsText} numberOfLines={2}>
+                        {beat.kind === 'seed'
+                          ? beat.speaker === 'The play' ? 'Premise forgotten' : 'Character fact forgotten'
+                          : beat.speaker}: {beat.text}
+                      </Text>
+                    ))}
+                  </View>
+                )}
               </ScrollView>
             </View>
 
@@ -493,16 +505,20 @@ function Stage({
                   accessibilityLabel="Director's note"
                   value={note}
                   onChangeText={setNote}
-                  placeholder={snapshot.directorNoteUsed ? 'Your one intervention is already in the script.' : 'Make them explain the second bride...'}
+                  placeholder={snapshot.directorNoteUsed
+                    ? 'Your one intervention is already in the script.'
+                    : directionDisabled
+                      ? 'Wait for the actor to finish this line.'
+                      : 'Make them explain the second bride...'}
                   placeholderTextColor="#706658"
                   multiline
-                  editable={!snapshot.directorNoteUsed}
+                  editable={!directionDisabled}
                   maxLength={120}
-                  style={[styles.directionInput, snapshot.directorNoteUsed && styles.directionInputDisabled]}
+                  style={[styles.directionInput, directionDisabled && styles.directionInputDisabled]}
                 />
                 <View style={styles.directionFooter}>
-                  <Text style={styles.noteCounter}>{snapshot.directorNoteUsed ? 'intervention spent' : `${note.length}/120 · costs memory`}</Text>
-                  <ActionButton label={snapshot.directorNoteUsed ? 'Note sent' : 'Send note'} variant="ghost" disabled={snapshot.directorNoteUsed || !note.trim()} onPress={submitDirection} />
+                  <Text style={styles.noteCounter}>{snapshot.directorNoteUsed ? 'intervention spent' : directionDisabled ? 'actor response pending' : `${note.length}/120 · costs memory`}</Text>
+                  <ActionButton label={snapshot.directorNoteUsed ? 'Note sent' : 'Send note'} variant="ghost" disabled={directionDisabled || !note.trim()} onPress={submitDirection} />
                 </View>
               </View>
 
@@ -987,6 +1003,9 @@ const styles = StyleSheet.create({
   contradictionLabel: { color: colors.gold, fontSize: 8, letterSpacing: 1.2, fontWeight: '900', marginBottom: 4 },
   contradictionText: { color: colors.paper, fontSize: 13, lineHeight: 19, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
   contradictionWaiting: { color: colors.smoke, fontStyle: 'italic' },
+  queuedEvictions: { borderWidth: 1, borderColor: '#683226', backgroundColor: '#160e0c', padding: 12, marginTop: 4 },
+  queuedEvictionsKicker: { color: colors.ember, fontSize: 8, letterSpacing: 1.3, fontWeight: '900', marginBottom: 6 },
+  queuedEvictionsText: { color: '#c99b8e', fontSize: 11, lineHeight: 17, textDecorationLine: 'line-through' },
   controlPanel: { width: 360, maxWidth: '100%', alignSelf: 'stretch', backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, padding: 17, gap: 16 },
   meterLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 },
   meterTitle: { color: colors.paper, fontSize: 9, letterSpacing: 1.7, fontWeight: '900' },

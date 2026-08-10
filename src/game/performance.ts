@@ -32,7 +32,7 @@ export type PerformanceProvider = {
   open(performance: PerformanceSession): Promise<PerformanceResult>;
   advance(performance: PerformanceSession): Promise<PerformanceResult>;
   finish(performance: PerformanceSession): Promise<PerformanceResult>;
-  direction(performance: PerformanceSession, note: string): PerformanceResult;
+  direction(performance: PerformanceSession, note: string): PerformanceResult | null;
 };
 
 function errorDetail(error: unknown): string {
@@ -128,6 +128,7 @@ export function createPerformanceProvider(generate: LiveGenerator): PerformanceP
     },
 
     direction(performance, note) {
+      if (performance.session.beatPending) return null;
       return result(performance, addDirectorNote(performance.session, note), performance.mode);
     },
   };

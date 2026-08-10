@@ -84,7 +84,12 @@ test('finishes only after the configured rounds and exposes drift', () => {
 
 test('records two consecutive actor replacements against the same evicted seed', () => {
   const session = createGameSession(premise.id, premise.premise);
-  for (let i = 0; i < 13; i += 1) advanceGameSession(session);
+  let advances = 0;
+  while (snapshotSession(session).scheduledProbeCount === 0 && advances < 13) {
+    advanceGameSession(session);
+    advances += 1;
+  }
+  assert.ok(advances < 13, 'fixture must queue a seed probe before the final two turns');
 
   const first = prepareGameBeat(session);
   assert.ok(first.probe, 'the next normal turn must surface the seed eviction');
@@ -95,16 +100,16 @@ test('records two consecutive actor replacements against the same evicted seed',
 
   commitGeneratedBeat(session, first.speaker, 'The wedding belongs to Kavya and Dev beneath the west veranda.');
   let snapshot = snapshotSession(session);
-  assert.equal(snapshot.contradictions.length, 1);
-  assert.equal(snapshot.contradictions[0]!.lostSeed.id, first.probe.lostSeed.id);
-  assert.deepEqual(snapshot.contradictions[0]!.responses, [
+  let event = snapshot.contradictions.find((item) => item.lostSeed.id === first.probe!.lostSeed.id);
+  assert.ok(event);
+  assert.deepEqual(event.responses, [
     {
       speaker: first.speaker.name,
       emoji: first.speaker.emoji,
       text: 'The wedding belongs to Kavya and Dev beneath the west veranda.',
     },
   ]);
-  assert.equal(snapshot.contradictions[0]!.complete, false);
+  assert.equal(event.complete, false);
 
   const second = prepareGameBeat(session);
   assert.ok(second.probe);
@@ -114,10 +119,11 @@ test('records two consecutive actor replacements against the same evicted seed',
   commitGeneratedBeat(session, second.speaker, 'This ceremony celebrates Naina marrying Mihir on the palace roof.');
 
   snapshot = snapshotSession(session);
-  assert.equal(snapshot.contradictions.length, 1, 'responses group by lost seed id');
-  assert.equal(snapshot.contradictions[0]!.responses.length, 2);
-  assert.equal(snapshot.contradictions[0]!.responses[1]!.speaker, second.speaker.name);
-  assert.equal(snapshot.contradictions[0]!.complete, true);
+  event = snapshot.contradictions.find((item) => item.lostSeed.id === first.probe!.lostSeed.id);
+  assert.ok(event);
+  assert.equal(event.responses.length, 2, 'responses group by lost seed id');
+  assert.equal(event.responses[1]!.speaker, second.speaker.name);
+  assert.equal(event.complete, true);
 });
 
 test('aggregates automatic-direction and generated-line evictions', () => {
@@ -157,4 +163,46 @@ test('snapshot contradiction values are defensively copied at every nested level
   const second = snapshotSession(session);
   assert.equal(second.contradictions[0]!.lostSeed.text, originalSeed);
   assert.equal(second.contradictions[0]!.responses[0]!.text, originalResponse);
+});
+
+test('five-round offline play completes every forgotten seed probe without stranded work', () => {
+  for (const option of PREMISES) {
+    const session = createGameSession(option.id, option.premise);
+    for (let i = 0; i < DEMO_ROUNDS * session.engine.cast.length; i += 1) {
+      advanceGameSession(session);
+    }
+
+    const snapshot = snapshotSession(session);
+    const forgottenSeeds = snapshot.forgotten.filter((beat) => beat.kind === 'seed');
+    assert.ok(forgottenSeeds.length > 0, `${option.id} must exercise real seed eviction`);
+    assert.equal(snapshot.scheduledProbeCount, 0, `${option.id} may not strand a probe at curtain`);
+    for (const seed of forgottenSeeds) {
+      const event = snapshot.contradictions.find((item) => item.lostSeed.id === seed.id);
+      assert.ok(event, `${option.id} forgotten seed ${seed.id} must have an event`);
+      assert.equal(event.complete, true);
+      assert.equal(event.responses.length, 2);
+      assert.notEqual(event.responses[0]!.speaker, event.responses[1]!.speaker);
+    }
+  }
+});
+
+test('cascading evictions display the same lost seed as the paired contradiction card', () => {
+  const session = createGameSession(premise.id, premise.premise);
+  for (let i = 0; i < 14; i += 1) advanceGameSession(session);
+
+  const snapshot = snapshotSession(session);
+  assert.ok(snapshot.lastForgotten.length > 0, 'fixture must trigger cascading eviction');
+  assert.ok(snapshot.forgettingDisplay, 'snapshot must expose a keyed causal display');
+  assert.equal(
+    snapshot.forgettingDisplay.forgotten.id,
+    snapshot.forgettingDisplay.contradiction.lostSeed.id,
+    'notice and card must identify the same lost seed',
+  );
+  assert.equal(
+    snapshot.forgettingDisplay.cascading.some(
+      (beat) => beat.id === snapshot.forgettingDisplay!.forgotten.id,
+    ),
+    false,
+    'newly queued losses stay visually separate from the chain being answered',
+  );
 });

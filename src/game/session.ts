@@ -21,6 +21,12 @@ export type ContradictionEvent = {
   complete: boolean;
 };
 
+export type ForgettingDisplay = {
+  forgotten: Beat;
+  contradiction: ContradictionEvent;
+  cascading: Beat[];
+};
+
 export type GameSession = {
   engine: TheaterEngine;
   premiseId: string;
@@ -33,6 +39,7 @@ export type GameSession = {
   pendingProbe: MemoryProbe | null;
   pendingForgotten: Beat[];
   contradictions: ContradictionEvent[];
+  beatPending: boolean;
 };
 
 export type SessionSnapshot = {
@@ -49,6 +56,9 @@ export type SessionSnapshot = {
   pinnedCount: number;
   directorNoteUsed: boolean;
   contradictions: ContradictionEvent[];
+  actorResponsePending: boolean;
+  scheduledProbeCount: number;
+  forgettingDisplay: ForgettingDisplay | null;
 };
 
 function openingFor(premiseId: string): string {
@@ -131,6 +141,18 @@ function copyContradiction(event: ContradictionEvent): ContradictionEvent {
   };
 }
 
+function forgettingDisplay(session: GameSession): ForgettingDisplay | null {
+  const contradiction = session.contradictions[session.contradictions.length - 1];
+  if (!contradiction) return null;
+  return {
+    forgotten: { ...contradiction.lostSeed },
+    contradiction: copyContradiction(contradiction),
+    cascading: session.lastForgotten
+      .filter((beat) => beat.id !== contradiction.lostSeed.id)
+      .map((beat) => ({ ...beat })),
+  };
+}
+
 export function createGameSession(
   premiseId: string,
   premise: string,
@@ -156,6 +178,7 @@ export function createGameSession(
     pendingProbe: null,
     pendingForgotten: [],
     contradictions: [],
+    beatPending: false,
   };
 }
 
@@ -165,6 +188,7 @@ export function commitGeneratedOpening(session: GameSession, text = openingFor(s
   session.lastForgotten = session.engine.lastForgotten.map((item) => ({ ...item }));
   session.pendingProbe = null;
   session.pendingForgotten = [];
+  session.beatPending = false;
   return beat;
 }
 
@@ -173,7 +197,7 @@ export function prepareGameBeat(session: GameSession): {
   probe: MemoryProbe | null;
 } {
   if (session.complete) throw new Error('the play has already ended');
-  if (session.pendingProbe) throw new Error('a prepared beat is already pending');
+  if (session.beatPending) throw new Error('a prepared beat is already pending');
   // Eviction nobody reacts to is invisible. Losing a seed queues an order to
   // state that fact plainly, and the contradiction happens in the open.
   const probe = session.engine.nextProbe();
@@ -182,6 +206,7 @@ export function prepareGameBeat(session: GameSession): {
   session.pendingForgotten = probe
     ? session.engine.lastForgotten.map((item) => ({ ...item }))
     : [];
+  session.beatPending = true;
   return { speaker: session.engine.nextSpeaker(), probe: copyProbe(probe) };
 }
 
@@ -232,6 +257,7 @@ export function commitGeneratedBeat(
 
   session.pendingProbe = null;
   session.pendingForgotten = [];
+  session.beatPending = false;
   session.turnInRound += 1;
 
   if (session.turnInRound >= session.engine.cast.length) {
@@ -243,7 +269,7 @@ export function commitGeneratedBeat(
 
 export function addDirectorNote(session: GameSession, note: string): Beat {
   if (session.complete) throw new Error('the play has already ended');
-  if (session.pendingProbe) throw new Error('an actor response is already pending');
+  if (session.beatPending) throw new Error('an actor response is already pending');
   if (session.directorNotes >= 1) throw new Error('the director note has already been used');
   const beat = session.engine.addDirection(note);
   session.lastForgotten = session.engine.lastForgotten.map((item) => ({ ...item }));
@@ -264,6 +290,7 @@ export function commitGeneratedCurtain(session: GameSession, text: string): Beat
   session.lastForgotten = session.engine.lastForgotten.map((item) => ({ ...item }));
   session.pendingProbe = null;
   session.pendingForgotten = [];
+  session.beatPending = false;
   session.complete = true;
   return beat;
 }
@@ -292,5 +319,8 @@ export function snapshotSession(session: GameSession): SessionSnapshot {
     pinnedCount: session.engine.pinnedCount(),
     directorNoteUsed: session.directorNotes > 0,
     contradictions: session.contradictions.map(copyContradiction),
+    actorResponsePending: session.beatPending,
+    scheduledProbeCount: session.engine.pendingProbeCount() + (session.pendingProbe ? 1 : 0),
+    forgettingDisplay: forgettingDisplay(session),
   };
 }
