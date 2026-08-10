@@ -28,6 +28,7 @@ import {
 import {
   DEMO_ROUNDS,
   canFinish,
+  directorNoteDraftAfterAttempt,
   pinBeat,
   snapshotSession,
   type GameSession,
@@ -326,7 +327,7 @@ function Stage({
 }: {
   session: GameSession;
   onAdvance: () => void;
-  onDirection: (note: string) => void;
+  onDirection: (note: string) => boolean;
   onPin: (id: number) => void;
   onFinish: () => void;
   onExit: () => void;
@@ -351,8 +352,8 @@ function Stage({
   const submitDirection = () => {
     const value = note.trim();
     if (!value || directionDisabled) return;
-    onDirection(value);
-    setNote('');
+    const accepted = onDirection(value);
+    setNote((draft) => directorNoteDraftAfterAttempt(draft, accepted));
   };
 
   return (
@@ -861,7 +862,12 @@ export default function App() {
             busy={busy}
             fallbackReason={performance.lastFallbackReason}
             onAdvance={() => { void advance(); }}
-            onDirection={(note) => mutate((value) => { performanceProvider.direction(value, note); })}
+            onDirection={(note) => {
+              if (!performance) return false;
+              const accepted = performanceProvider.direction(performance, note) !== null;
+              if (accepted) setRevision((value) => value + 1);
+              return accepted;
+            }}
             onPin={(id) => mutate((value) => { pinBeat(value.session, id); })}
             onFinish={() => { void finish(); }}
             onExit={() => transition('lobby')}

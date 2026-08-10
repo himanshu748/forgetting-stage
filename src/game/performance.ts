@@ -7,6 +7,7 @@ import {
   commitGeneratedBeat,
   commitGeneratedCurtain,
   commitGeneratedOpening,
+  canFinish,
   createGameSession,
   finishGameSession,
   prepareGameBeat,
@@ -112,6 +113,9 @@ export function createPerformanceProvider(generate: LiveGenerator): PerformanceP
     },
 
     finish(performance) {
+      if (!canFinish(performance.session)) {
+        return Promise.reject(new Error('the curtain cannot fall before every round and probe response finish'));
+      }
       return liveOrFallback({
         performance,
         kind: 'curtain',

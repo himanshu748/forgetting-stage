@@ -30,6 +30,7 @@ import {
   type CountTokens,
   type Drift,
   type MemoryProbe,
+  type SeedResponseReservation,
 } from './types.ts';
 
 export function scriptLine(beat: Beat): string {
@@ -46,6 +47,7 @@ export class TheaterEngine {
   readonly budget: number;
   private readonly countTokens: CountTokens;
   private readonly register: string;
+  private readonly seedResponseReservation?: SeedResponseReservation;
 
   memory: Beat[] = [];
   forgotten: Beat[] = [];
@@ -60,11 +62,13 @@ export class TheaterEngine {
     countTokens: CountTokens;
     budget?: number;
     register?: string;
+    seedResponseReservation?: SeedResponseReservation;
   }) {
     this.cast = [...opts.cast];
     this.countTokens = opts.countTokens;
     this.budget = opts.budget ?? BUDGET_TOKENS;
     this.register = REGISTERS[opts.register ?? DEFAULT_REGISTER] ?? REGISTERS[DEFAULT_REGISTER]!;
+    this.seedResponseReservation = opts.seedResponseReservation;
   }
 
   // ---- memory ------------------------------------------------------------ //
@@ -102,7 +106,15 @@ export class TheaterEngine {
     // Evict oldest UNPINNED beats until we fit. A play made entirely of pinned
     // beats can exceed budget; that is correct, the player chose it.
     while (this.memoryTokens() > this.budget) {
-      const victim = this.memory.findIndex((b) => !b.pinned && b.id !== beat.id);
+      const oldest = this.memory.findIndex((b) => !b.pinned && b.id !== beat.id);
+      if (oldest === -1) break;
+      const oldestBeat = this.memory[oldest];
+      const seedHasCapacity = oldestBeat?.kind !== 'seed' || this.canReserveSeedResponses();
+      const victim = seedHasCapacity
+        ? oldest
+        : this.memory.findIndex(
+          (candidate) => !candidate.pinned && candidate.id !== beat.id && candidate.kind !== 'seed',
+        );
       if (victim === -1) break;
       const [dropped] = this.memory.splice(victim, 1);
       if (!dropped) break;
@@ -120,6 +132,16 @@ export class TheaterEngine {
         }
       }
     }
+  }
+
+  private canReserveSeedResponses(): boolean {
+    if (!this.seedResponseReservation) return true;
+    const remainingActorSlots = Math.max(0, this.seedResponseReservation.remainingActorSlots);
+    const preparedProbeResponses = Math.max(
+      0,
+      this.seedResponseReservation.preparedProbeResponses,
+    );
+    return this.probes.length + preparedProbeResponses + 2 <= remainingActorSlots;
   }
 
   private newBeat(

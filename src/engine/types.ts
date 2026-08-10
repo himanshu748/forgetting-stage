@@ -27,6 +27,15 @@ export type MemoryProbe = {
   responseCount: number;
 };
 
+/**
+ * Optional live-session pacing state. The engine reads this object while
+ * evicting; callers that omit it retain the original oldest-first behavior.
+ */
+export type SeedResponseReservation = {
+  remainingActorSlots: number;
+  preparedProbeResponses: number;
+};
+
 export type ChatMessage = {
   role: 'system' | 'user';
   content: string;
