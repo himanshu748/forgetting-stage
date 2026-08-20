@@ -293,6 +293,9 @@ export function createGameSession(
   if (distinctSpeakers.size < 2) {
     throw new Error('reserved game sessions require at least two distinct speakers');
   }
+  if (distinctSpeakers.size !== cast.length) {
+    throw new Error('reserved game sessions require every cast member name to be unique');
+  }
   const seedResponseReservation: SeedResponseReservation = {
     remainingActorSlots: DEMO_ROUNDS * cast.length,
     preparedProbeResponses: 0,

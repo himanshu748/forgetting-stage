@@ -370,6 +370,13 @@ test('reserved game sessions require at least two distinct speakers', () => {
   );
 });
 
+test('reserved game sessions reject a repeated name in a three-entry cast', () => {
+  assert.throws(
+    () => createGameSession(premise.id, premise.premise, [CAST[0]!, CAST[1]!, { ...CAST[0]! }]),
+    /unique|distinct/i,
+  );
+});
+
 test('Director note draft clears only when the callback accepts the note', () => {
   assert.equal(
     directorNoteDraftAfterAttempt('  Preserve this exact note.  ', false),
