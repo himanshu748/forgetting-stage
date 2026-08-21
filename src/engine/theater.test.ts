@@ -136,6 +136,8 @@ test('a pinned beat survives while unpinned beats around it are evicted', () => 
     e.forgotten.some((b) => b.id === pinnedBeat.id),
     false,
   );
+  assert.ok(e.unpinnedMemoryTokens() <= e.budget, 'all forgettable memory stays under cap');
+  assert.ok(e.memoryTokens() >= e.unpinnedMemoryTokens(), 'the pinned truth is reported separately');
 });
 
 test('pins are capped', () => {

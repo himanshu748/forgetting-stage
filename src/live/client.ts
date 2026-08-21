@@ -1,8 +1,8 @@
-import type { GenerationRequest, GenerationResponse } from './contract.ts';
+import type { PerformanceRequest, PerformanceResponse } from './contract.ts';
 
-export type LiveGenerator = (request: GenerationRequest) => Promise<string>;
+export type LivePerformanceClient = (request: PerformanceRequest) => Promise<PerformanceResponse>;
 
-export type LiveGeneratorOptions = {
+export type LivePerformanceClientOptions = {
   platform: string;
   endpoint?: string;
   fetchImpl?: typeof fetch;
@@ -28,7 +28,24 @@ function isConfiguredNativeEndpoint(platform: string, endpoint: string | undefin
   }
 }
 
-export function createLiveGenerator(options: LiveGeneratorOptions): LiveGenerator {
+function isPerformanceResponse(value: unknown): value is PerformanceResponse {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const response = value as Partial<PerformanceResponse>;
+  return typeof response.performanceId === 'string'
+    && typeof response.requestId === 'string'
+    && typeof response.model === 'string'
+    && (response.source === 'model'
+      || response.source === 'safety-fallback'
+      || response.source === 'state-only')
+    && !!response.snapshot
+    && typeof response.snapshot === 'object'
+    && !!response.drift
+    && typeof response.drift === 'object';
+}
+
+export function createLivePerformanceClient(
+  options: LivePerformanceClientOptions,
+): LivePerformanceClient {
   const endpoint = options.endpoint ?? '/api/generate';
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 20_000;
@@ -46,17 +63,19 @@ export function createLiveGenerator(options: LiveGeneratorOptions): LiveGenerato
         body: JSON.stringify(request),
         signal: controller.signal,
       });
-      const body = await response.json() as Partial<GenerationResponse> & {
-        error?: string;
-        code?: string;
-      };
-      if (!response.ok || typeof body.text !== 'string' || !body.text.trim()) {
+      const body = await response.json() as unknown;
+      if (!response.ok || !isPerformanceResponse(body)) {
+        const error = body && typeof body === 'object'
+          ? body as { error?: unknown; code?: unknown }
+          : {};
         throw new LiveGenerationError(
-          body.error ?? `Generation failed with status ${response.status}`,
-          body.code ?? 'generation_failed',
+          typeof error.error === 'string'
+            ? error.error
+            : `Performance request failed with status ${response.status}`,
+          typeof error.code === 'string' ? error.code : 'generation_failed',
         );
       }
-      return body.text.trim();
+      return body;
     } catch (error) {
       if (error instanceof LiveGenerationError) throw error;
       if (error instanceof Error && error.name === 'AbortError') {

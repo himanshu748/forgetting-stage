@@ -8,6 +8,8 @@ export type RevenueCatPublicKeys = {
 export type PublicConfig = {
   generationEndpoint?: string;
   revenueCat: RevenueCatPublicKeys;
+  oneSignalAppId?: string;
+  layersAppId?: string;
 };
 
 export function readPublicConfig(): PublicConfig {
@@ -19,6 +21,8 @@ export function readPublicConfig(): PublicConfig {
       android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
       useTestStore: process.env.EXPO_PUBLIC_REVENUECAT_USE_TEST_STORE === 'true',
     },
+    oneSignalAppId: process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID,
+    layersAppId: process.env.EXPO_PUBLIC_LAYERS_APP_ID,
   };
 }
 

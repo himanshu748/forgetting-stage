@@ -81,8 +81,18 @@ export class TheaterEngine {
     return this.memory.length ? this.countTokens(this.transcript()) : 0;
   }
 
+  /**
+   * The advertised limit applies to forgettable memory. A player's single
+   * pinned truth sits outside that allowance, otherwise pinning a long line
+   * could make the engine claim a cap it cannot actually maintain.
+   */
+  unpinnedMemoryTokens(): number {
+    const unpinned = this.memory.filter((beat) => !beat.pinned);
+    return unpinned.length ? this.countTokens(this.transcript(unpinned)) : 0;
+  }
+
   budgetFraction(): number {
-    return Math.min(1, this.memoryTokens() / this.budget);
+    return Math.min(1, this.unpinnedMemoryTokens() / this.budget);
   }
 
   pinnedCount(): number {
@@ -105,7 +115,7 @@ export class TheaterEngine {
 
     // Evict oldest UNPINNED beats until we fit. A play made entirely of pinned
     // beats can exceed budget; that is correct, the player chose it.
-    while (this.memoryTokens() > this.budget) {
+    while (this.unpinnedMemoryTokens() > this.budget) {
       const oldest = this.memory.findIndex((b) => !b.pinned && b.id !== beat.id);
       if (oldest === -1) break;
       const oldestBeat = this.memory[oldest];

@@ -9,9 +9,16 @@ import { CAST, CURTAINS, DEMO_LINES, OPENINGS } from './content.ts';
 
 export const DEMO_BUDGET = 172;
 export const DEMO_ROUNDS = 5;
+export const LIVE_BUDGET = 1_000;
+export const LIVE_ROUNDS = 10;
+export const LIVE_EXTENSION_ROUNDS = 2;
 
 export const countDemoTokens = (text: string) =>
   text.trim() ? text.trim().split(/\s+/).length : 0;
+
+/** Honest client-side fallback only. Live sessions use the serving model's tokenizer. */
+export const countApproxModelTokens = (text: string) =>
+  text ? Math.ceil(text.length / 4) : 0;
 
 export type ContradictionResponse = {
   speaker: string;
@@ -46,6 +53,9 @@ export type GameSession = {
   contradictions: ContradictionEvent[];
   beatPending: boolean;
   seedResponseReservation: SeedResponseReservation;
+  maxRounds: number;
+  hardMaxRounds: number;
+  requiredContradictions: number;
 };
 
 export type SessionSnapshot = {
@@ -53,28 +63,45 @@ export type SessionSnapshot = {
   forgotten: Beat[];
   lastForgotten: Beat[];
   memoryTokens: number;
+  totalMemoryTokens: number;
   budget: number;
+  maxRounds: number;
   round: number;
   turnInRound: number;
   nextSpeaker: Character | null;
   complete: boolean;
   canAdvance: boolean;
+  canFinish: boolean;
   pinnedCount: number;
   directorNoteUsed: boolean;
   contradictions: ContradictionEvent[];
   actorResponsePending: boolean;
   scheduledProbeCount: number;
   forgettingDisplay: ForgettingDisplay | null;
+  failureReason: string | null;
 };
 
 function openingFor(premiseId: string): string {
   return OPENINGS[premiseId] ?? 'The curtain rises on a room where certainty is already becoming dangerous.';
 }
 
-function lineFor(premiseId: string, round: number, turn: number, speaker: Character): string {
+const LONG_PLAY_DETAILS = [
+  'I checked the signed ledger at dawn, counted every chair myself and heard two witnesses repeat the same account beside the locked west door.',
+  'The brass key, the blue envelope and the rooftop musicians all confirm my version, and the entire family accepted those details before breakfast.',
+  'I wrote the exact names, hour and address on the kitchen wall, then watched three officials stamp the page without raising a single objection.',
+] as const;
+
+function lineFor(
+  premiseId: string,
+  round: number,
+  turn: number,
+  speaker: Character,
+  longPlay: boolean,
+): string {
   const rounds = DEMO_LINES[premiseId] ?? DEMO_LINES.wedding;
   const lines = rounds?.[round - 1];
-  return lines?.[turn] ?? `${speaker.name} states a new certainty that nobody else can verify.`;
+  const line = lines?.[turn] ?? `${speaker.name} states a new certainty that nobody else can verify.`;
+  return longPlay ? `${line} ${LONG_PLAY_DETAILS[turn % LONG_PLAY_DETAILS.length]}` : line;
 }
 
 function stableIndex(key: string, length: number): number {
@@ -232,7 +259,7 @@ function preparedProbe(session: GameSession, probe: MemoryProbe): MemoryProbe {
 
 function remainingActorSlots(session: GameSession): number {
   const completed = (session.round - 1) * session.engine.cast.length + session.turnInRound;
-  return Math.max(0, DEMO_ROUNDS * session.engine.cast.length - completed);
+  return Math.max(0, session.maxRounds * session.engine.cast.length - completed);
 }
 
 function updateSeedResponseReservation(
@@ -251,6 +278,23 @@ function updateSeedResponseReservation(
 
 function scheduledProbeCount(session: GameSession): number {
   return session.engine.pendingProbeCount() + (session.pendingProbe ? 1 : 0);
+}
+
+function completedContradictionCount(session: GameSession): number {
+  return session.contradictions.filter((event) => isCompleteContradiction(event)).length;
+}
+
+function needsMoreForgettingWork(session: GameSession): boolean {
+  return completedContradictionCount(session) < session.requiredContradictions
+    || scheduledProbeCount(session) > 0
+    || session.contradictions.some((event) => !isCompleteContradiction(event));
+}
+
+function canExtendForForgetting(session: GameSession): boolean {
+  return !session.complete
+    && remainingActorSlots(session) === 0
+    && session.maxRounds < session.hardMaxRounds
+    && needsMoreForgettingWork(session);
 }
 
 function validatePendingProbeResponse(
@@ -285,7 +329,14 @@ export function createGameSession(
   premiseId: string,
   premise: string,
   cast: Character[] = CAST,
-  options: { commitOpening?: boolean } = {},
+  options: {
+    commitOpening?: boolean;
+    countTokens?: (text: string) => number;
+    budget?: number;
+    rounds?: number;
+    requiredContradictions?: number;
+    maxExtensionRounds?: number;
+  } = {},
 ): GameSession {
   const distinctSpeakers = new Set(
     cast.map((speaker) => speaker.name.trim().toLocaleLowerCase('en')),
@@ -297,13 +348,13 @@ export function createGameSession(
     throw new Error('reserved game sessions require every cast member name to be unique');
   }
   const seedResponseReservation: SeedResponseReservation = {
-    remainingActorSlots: DEMO_ROUNDS * cast.length,
+    remainingActorSlots: (options.rounds ?? DEMO_ROUNDS) * cast.length,
     preparedProbeResponses: 0,
   };
   const engine = new TheaterEngine({
     cast,
-    countTokens: countDemoTokens,
-    budget: DEMO_BUDGET,
+    countTokens: options.countTokens ?? countDemoTokens,
+    budget: options.budget ?? DEMO_BUDGET,
     seedResponseReservation,
   });
   engine.prepareOpening(premise);
@@ -322,6 +373,9 @@ export function createGameSession(
     contradictions: [],
     beatPending: false,
     seedResponseReservation,
+    maxRounds: options.rounds ?? DEMO_ROUNDS,
+    hardMaxRounds: (options.rounds ?? DEMO_ROUNDS) + (options.maxExtensionRounds ?? 0),
+    requiredContradictions: Math.max(0, options.requiredContradictions ?? 0),
   };
 }
 
@@ -336,13 +390,23 @@ export function commitGeneratedOpening(session: GameSession, text = openingFor(s
   return beat;
 }
 
-export function prepareGameBeat(session: GameSession): {
+export function prepareGameBeat(
+  session: GameSession,
+  options: { forceRecoveryRound?: boolean } = {},
+): {
   speaker: Character;
   probe: MemoryProbe | null;
 } {
   if (session.complete) throw new Error('the play has already ended');
   if (session.beatPending) throw new Error('a prepared beat is already pending');
-  if (remainingActorSlots(session) === 0) throw new Error('all configured actor rounds are complete');
+  if (remainingActorSlots(session) === 0) {
+    const forcedRecovery = options.forceRecoveryRound && session.maxRounds < session.hardMaxRounds;
+    if (!canExtendForForgetting(session) && !forcedRecovery) {
+      throw new Error('all configured actor rounds are complete');
+    }
+    session.maxRounds += 1;
+    updateSeedResponseReservation(session, { preparedProbeResponses: 0 });
+  }
   // Eviction nobody reacts to is invisible. Losing a seed queues an order to
   // state that fact plainly, and the contradiction happens in the open.
   const queuedProbe = session.engine.nextProbe();
@@ -369,7 +433,13 @@ export function advanceGameSession(session: GameSession, preparedSpeaker?: Chara
     : [];
   const fallback = session.pendingProbe
     ? replacementFor(session.premise, session.pendingProbe, speaker, priorResponses)
-    : lineFor(session.premiseId, session.round, session.turnInRound, speaker);
+    : lineFor(
+      session.premiseId,
+      session.round,
+      session.turnInRound,
+      speaker,
+      session.engine.budget >= LIVE_BUDGET,
+    );
   return commitGeneratedBeat(
     session,
     speaker,
@@ -462,29 +532,41 @@ export function pinBeat(session: GameSession, beatId: number): boolean {
 }
 
 export function canFinish(session: GameSession): boolean {
-  return session.round > DEMO_ROUNDS
+  return session.round > session.maxRounds
     && scheduledProbeCount(session) === 0
+    && completedContradictionCount(session) >= session.requiredContradictions
     && session.contradictions.every((event) => isCompleteContradiction(event));
 }
 
 export function snapshotSession(session: GameSession): SessionSnapshot {
+  const finishable = canFinish(session);
+  const extendable = canExtendForForgetting(session);
+  const canAdvance = !session.complete && (session.round <= session.maxRounds || extendable);
+  const failureReason = !session.complete && !finishable && !canAdvance
+    && session.requiredContradictions > 0
+    ? 'This run did not produce a complete forgetting event. Start a new performance and try again.'
+    : null;
   return {
     memory: session.engine.memory.map((beat) => ({ ...beat })),
     forgotten: session.engine.forgotten.map((beat) => ({ ...beat })),
     lastForgotten: session.lastForgotten.map((beat) => ({ ...beat })),
-    memoryTokens: session.engine.memoryTokens(),
+    memoryTokens: session.engine.unpinnedMemoryTokens(),
+    totalMemoryTokens: session.engine.memoryTokens(),
     budget: session.engine.budget,
-    round: Math.min(session.round, DEMO_ROUNDS),
+    maxRounds: session.maxRounds,
+    round: Math.min(session.round, session.maxRounds),
     turnInRound: session.turnInRound,
     nextSpeaker:
-      session.complete || session.round > DEMO_ROUNDS ? null : { ...session.engine.nextSpeaker() },
+      session.complete || !canAdvance ? null : { ...session.engine.nextSpeaker() },
     complete: session.complete,
-    canAdvance: !session.complete && session.round <= DEMO_ROUNDS,
+    canAdvance,
+    canFinish: finishable,
     pinnedCount: session.engine.pinnedCount(),
     directorNoteUsed: session.directorNotes > 0,
     contradictions: session.contradictions.map(copyContradiction),
     actorResponsePending: session.beatPending,
     scheduledProbeCount: scheduledProbeCount(session),
     forgettingDisplay: forgettingDisplay(session),
+    failureReason,
   };
 }

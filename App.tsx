@@ -17,24 +17,31 @@ import {
   View,
 } from 'react-native';
 
-import type { Beat } from './src/engine/types.ts';
+import {
+  createLayersClient,
+  type ReminderVariant,
+} from './src/analytics/layers.ts';
+import type { Beat, Drift as DriftReport } from './src/engine/types.ts';
 import { readPublicConfig, resolveGenerationEndpoint } from './src/config/public.ts';
 import { CAST, PREMISES, type PremiseOption } from './src/game/content.ts';
 import {
   createPerformanceProvider,
   createPerformanceSession,
+  performanceDrift,
+  performanceSnapshot,
   type PerformanceMode,
   type PerformanceSession,
 } from './src/game/performance.ts';
 import {
-  DEMO_ROUNDS,
-  canFinish,
   directorNoteDraftAfterAttempt,
-  pinBeat,
-  snapshotSession,
   type GameSession,
+  type SessionSnapshot,
 } from './src/game/session.ts';
-import { createLiveGenerator } from './src/live/client.ts';
+import { createLivePerformanceClient } from './src/live/client.ts';
+import {
+  createOneSignalClient,
+  type ReminderPermission,
+} from './src/engagement/onesignal.ts';
 import {
   canStartPerformance,
   ledgerFromState,
@@ -69,7 +76,7 @@ import {
 import { createLedgerStorage } from './src/monetization/storage.ts';
 
 const publicConfig = readPublicConfig();
-const performanceProvider = createPerformanceProvider(createLiveGenerator({
+const performanceProvider = createPerformanceProvider(createLivePerformanceClient({
   platform: Platform.OS,
   endpoint: resolveGenerationEndpoint(Platform.OS, publicConfig.generationEndpoint),
 }));
@@ -79,6 +86,22 @@ const revenueCat = createRevenueCatClient({
   publicKeys: publicConfig.revenueCat,
   loadPurchases: () => import('react-native-purchases'),
 });
+const oneSignal = createOneSignalClient({
+  platform: Platform.OS,
+  appId: publicConfig.oneSignalAppId,
+});
+const layers = createLayersClient({
+  platform: Platform.OS,
+  appId: publicConfig.layersAppId,
+  debug: __DEV__,
+});
+
+const DIRECTOR_CUES = [
+  'A storm breaks',
+  'An enemy returns',
+  'Someone confesses',
+  'Reveal the secret',
+] as const;
 
 const androidStatusBarHeight = Platform.OS === 'android' ? NativeStatusBar.currentHeight ?? 0 : 0;
 
@@ -203,7 +226,7 @@ function Lobby({
             </View>
           </View>
 
-          <View style={styles.ticket}>
+          <View style={[styles.ticket, compact && styles.ticketCompact]}>
             <View style={styles.ticketTop}>
               <Text style={styles.ticketKicker}>SELECT A PREMISE</Text>
               <Text style={styles.ticketNumber}>NO. 001</Text>
@@ -311,21 +334,36 @@ function Lobby({
   );
 }
 
-function MemoryMeter({ used, budget }: { used: number; budget: number }) {
+function MemoryMeter({
+  used,
+  budget,
+  exact,
+  forgottenCount,
+}: {
+  used: number;
+  budget: number;
+  exact: boolean;
+  forgottenCount: number;
+}) {
   const fraction = Math.min(1, used / budget);
+  const underPressure = fraction > 0.8;
   return (
     <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: budget, now: used }}>
       <View style={styles.meterLabels}>
         <Text style={styles.meterTitle}>SHARED MEMORY</Text>
-        <Text style={styles.meterValue}>{used} / {budget} TOKENS</Text>
+        <Text style={styles.meterValue}>{used} / {budget} {exact ? 'MODEL TOKENS' : 'EST. TOKENS'}</Text>
       </View>
-      <View style={styles.meterTrack}>
-        <View style={[styles.meterFill, { width: `${Math.max(3, fraction * 100)}%` }]} />
+      <View style={[styles.meterTrack, underPressure && styles.meterTrackHot]}>
+        <View style={[styles.meterFill, underPressure && styles.meterFillHot, { width: `${Math.max(3, fraction * 100)}%` }]} />
         <View style={styles.meterDangerLine} />
       </View>
       <View style={styles.meterLegend}>
-        <Text style={styles.meterHint}>Oldest unpinned beats fall first</Text>
-        <Text style={[styles.meterHint, fraction > 0.8 && styles.meterHintHot]}>{Math.round(fraction * 100)}% occupied</Text>
+        <Text style={[styles.meterHint, forgottenCount > 0 && styles.meterHintHot]}>
+          {forgottenCount > 0 ? `${forgottenCount} beats already lost` : 'Oldest unpinned beats fall first'}
+        </Text>
+        <Text style={[styles.meterHint, underPressure && styles.meterHintHot]}>
+          {underPressure ? 'EVICTION PRESSURE' : `${Math.round(fraction * 100)}% occupied`}
+        </Text>
       </View>
     </View>
   );
@@ -374,43 +412,46 @@ function BeatCard({
 
 function Stage({
   session,
+  snapshot,
   onAdvance,
   onDirection,
   onPin,
   onFinish,
   onExit,
   mode,
+  serverActive,
   busy,
   fallbackReason,
 }: {
   session: GameSession;
+  snapshot: SessionSnapshot;
   onAdvance: () => void;
-  onDirection: (note: string) => boolean;
+  onDirection: (note: string) => Promise<boolean>;
   onPin: (id: number) => void;
   onFinish: () => void;
   onExit: () => void;
   mode: PerformanceMode;
+  serverActive: boolean;
   busy: boolean;
   fallbackReason: string | null;
 }) {
   const { width } = useWindowDimensions();
   const [note, setNote] = useState('');
-  const snapshot = snapshotSession(session);
   const compact = width < 880;
   const feed = snapshot.memory.filter((beat) => beat.kind !== 'seed');
-  const canPin = snapshot.pinnedCount === 0;
+  const canPin = snapshot.pinnedCount === 0 && !busy;
   const forgettingDisplay = snapshot.forgettingDisplay;
   const contradiction = forgettingDisplay?.contradiction;
   const directionDisabled = snapshot.directorNoteUsed || busy || snapshot.actorResponsePending;
-  const progress = Math.min(DEMO_ROUNDS, snapshot.round);
+  const progress = Math.min(snapshot.maxRounds, snapshot.round);
   const actionLabel = snapshot.canAdvance
     ? `${snapshot.nextSpeaker?.name ?? 'Actor'} steps forward`
     : 'Ready for curtain';
 
-  const submitDirection = () => {
+  const submitDirection = async () => {
     const value = note.trim();
     if (!value || directionDisabled) return;
-    const accepted = onDirection(value);
+    const accepted = await onDirection(value);
     setNote((draft) => directorNoteDraftAfterAttempt(draft, accepted));
   };
 
@@ -431,14 +472,18 @@ function Stage({
               <View style={styles.liveStatusRow}>
                 <Text style={styles.stageKicker}>LIVE PERFORMANCE</Text>
                 <View style={[styles.modeBadge, mode === 'offline' && styles.modeBadgeOffline]}>
-                  <Text style={styles.modeBadgeText}>{mode === 'live' ? 'AI LIVE' : 'OFFLINE FALLBACK'}</Text>
+                  <Text style={styles.modeBadgeText}>
+                    {serverActive
+                      ? mode === 'live' ? 'AI LIVE · EXACT 1K' : 'SERVER SAFE LINE'
+                      : 'OFFLINE PREVIEW'}
+                  </Text>
                 </View>
               </View>
               <Text style={styles.stageTitle}>{session.premise}</Text>
             </View>
             <View style={styles.roundPill}>
               <Text style={styles.roundPillTop}>ROUND</Text>
-              <Text style={styles.roundPillValue}>{progress} / {DEMO_ROUNDS}</Text>
+              <Text style={styles.roundPillValue}>{progress} / {snapshot.maxRounds}</Text>
             </View>
           </View>
 
@@ -533,7 +578,12 @@ function Stage({
             </View>
 
             <View style={styles.controlPanel}>
-              <MemoryMeter used={snapshot.memoryTokens} budget={snapshot.budget} />
+              <MemoryMeter
+                used={snapshot.memoryTokens}
+                budget={snapshot.budget}
+                exact={serverActive}
+                forgottenCount={snapshot.forgotten.length}
+              />
 
               <View style={styles.truthPanel}>
                 <Text style={styles.controlKicker}>THE ONE THING THEY KEEP</Text>
@@ -548,7 +598,11 @@ function Stage({
               </View>
 
               <View style={styles.nextPanel}>
-                <Text style={styles.controlKicker}>{snapshot.canAdvance ? 'NEXT UNDER THE LIGHT' : 'THE CAST IS WAITING'}</Text>
+                <Text style={styles.controlKicker}>
+                  {snapshot.canAdvance
+                    ? 'NEXT UNDER THE LIGHT'
+                    : snapshot.canFinish ? 'THE CAST IS WAITING' : 'THE MEMORY TEST FAILED'}
+                </Text>
                 <View style={styles.nextActor}>
                   <Text style={styles.nextMonogram}>{snapshot.nextSpeaker?.emoji ?? 'C'}</Text>
                   <View>
@@ -575,22 +629,48 @@ function Stage({
                   maxLength={120}
                   style={[styles.directionInput, directionDisabled && styles.directionInputDisabled]}
                 />
+                {!snapshot.directorNoteUsed && (
+                  <View style={styles.directionCues}>
+                    {DIRECTOR_CUES.map((cue) => (
+                      <Pressable
+                        key={cue}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Use director cue: ${cue}`}
+                        disabled={directionDisabled}
+                        onPress={() => setNote(cue)}
+                        style={({ pressed }) => [
+                          styles.directionCue,
+                          directionDisabled && styles.directionCueDisabled,
+                          pressed && !directionDisabled && styles.directionCuePressed,
+                        ]}
+                      >
+                        <Text style={styles.directionCueText}>{cue}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
                 <View style={styles.directionFooter}>
                   <Text style={styles.noteCounter}>{snapshot.directorNoteUsed ? 'intervention spent' : directionDisabled ? 'actor response pending' : `${note.length}/120 · costs memory`}</Text>
-                  <ActionButton label={snapshot.directorNoteUsed ? 'Note sent' : 'Send note'} variant="ghost" disabled={directionDisabled || !note.trim()} onPress={submitDirection} />
+                  <ActionButton label={snapshot.directorNoteUsed ? 'Note sent' : 'Send note'} variant="ghost" disabled={directionDisabled || !note.trim()} onPress={() => { void submitDirection(); }} />
                 </View>
               </View>
 
               <View style={styles.stageActions}>
                 {snapshot.canAdvance ? (
                   <ActionButton label={busy ? 'Generating performance...' : actionLabel} disabled={busy} onPress={onAdvance} />
-                ) : (
+                ) : snapshot.canFinish ? (
                   <ActionButton label={busy ? 'Writing the curtain...' : 'Bring down the curtain'} disabled={busy} variant="danger" onPress={onFinish} />
+                ) : (
+                  <ActionButton label="Return to the lobby" disabled={busy} variant="ghost" onPress={onExit} />
                 )}
-                <Text style={[styles.stageFootnote, fallbackReason && styles.fallbackFootnote]}>
-                  {fallbackReason
-                    ? 'Live AI was unavailable, so this turn used the offline performance.'
-                    : canFinish(session)
+                <Text style={[styles.stageFootnote, (fallbackReason || snapshot.failureReason) && styles.fallbackFootnote]}>
+                  {snapshot.failureReason
+                    ? snapshot.failureReason
+                    : fallbackReason
+                    ? serverActive
+                      ? 'This turn broke a model rule, so the server committed a safe deterministic line.'
+                      : 'Live AI was unavailable, so this turn continued in the offline preview.'
+                    : snapshot.canFinish
                       ? 'The damage is done. End when ready.'
                       : 'Every line consumes the shared script.'}
                 </Text>
@@ -679,17 +759,26 @@ function HouseAd() {
 }
 
 function Drift({
-  session,
+  drift,
+  memoryTokens,
   houseAd,
+  reminderStatus,
+  reminderVariant,
+  reminderBusy,
+  onEnableReminder,
   onReplay,
   onNewPlay,
 }: {
-  session: GameSession;
+  drift: DriftReport;
+  memoryTokens: number;
   houseAd: boolean;
+  reminderStatus: ReminderPermission;
+  reminderVariant: ReminderVariant;
+  reminderBusy: boolean;
+  onEnableReminder: () => void;
   onReplay: () => void;
   onNewPlay: () => void;
 }) {
-  const drift = session.engine.drift();
   const pinned = drift.survived[0];
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -704,7 +793,7 @@ function Drift({
 
         <View style={styles.driftStats}>
           <View style={styles.stat}><Text style={styles.statValue}>{drift.forgottenCount}</Text><Text style={styles.statLabel}>BEATS FORGOTTEN</Text></View>
-          <View style={styles.stat}><Text style={styles.statValue}>{session.engine.memoryTokens()}</Text><Text style={styles.statLabel}>TOKENS AT CURTAIN</Text></View>
+          <View style={styles.stat}><Text style={styles.statValue}>{memoryTokens}</Text><Text style={styles.statLabel}>TOKENS AT CURTAIN</Text></View>
           <View style={styles.stat}><Text style={styles.statValue}>{pinned ? '1' : '0'}</Text><Text style={styles.statLabel}>TRUTH SURVIVED</Text></View>
         </View>
 
@@ -740,6 +829,35 @@ function Drift({
           ))}
         </View>
 
+        {reminderStatus !== 'unavailable' && (
+          <View style={styles.reminderPanel}>
+            <Text style={styles.reminderKicker}>TOMORROW'S CURTAIN</Text>
+            <Text style={styles.reminderCopy}>
+              {reminderStatus === 'enabled'
+                ? 'You will get one cue when the next free performance is ready.'
+                : reminderStatus === 'denied'
+                  ? 'Notifications are off. You can allow them from system settings.'
+                  : reminderStatus === 'error'
+                    ? 'The reminder could not be set. Your daily ticket still refreshes normally.'
+                    : reminderVariant === 'curiosity'
+                      ? 'Cue one notification tomorrow, when a new cast is ready to destroy a different truth.'
+                      : 'Ask for one notification when tomorrow’s free performance opens.'}
+            </Text>
+            <ActionButton
+              label={reminderBusy
+                ? 'Asking the stage manager...'
+                : reminderStatus === 'enabled'
+                  ? 'Reminder enabled'
+                  : reminderVariant === 'curiosity'
+                    ? 'Cue tomorrow’s disaster'
+                    : 'Remind me tomorrow'}
+              variant="ghost"
+              disabled={reminderBusy || reminderStatus === 'enabled'}
+              onPress={onEnableReminder}
+            />
+          </View>
+        )}
+
         {houseAd && <HouseAd />}
 
         <View style={styles.driftActions}>
@@ -765,7 +883,11 @@ export default function App() {
   const [paywallBusy, setPaywallBusy] = useState(false);
   const [paywallError, setPaywallError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const [reminderStatus, setReminderStatus] = useState<ReminderPermission>('unavailable');
+  const [reminderVariant, setReminderVariant] = useState<ReminderVariant>('free_show');
+  const [reminderBusy, setReminderBusy] = useState(false);
   const session = performance?.session ?? null;
+  const currentSnapshot = performance ? performanceSnapshot(performance) : null;
   const fade = useRef(new Animated.Value(1)).current;
   const launchGate = useRef(createPerformanceLaunchGate()).current;
   const premise = useMemo(
@@ -792,11 +914,24 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void oneSignal.initialize().then((configured) => {
+      if (active) setReminderStatus(configured ? 'ready' : 'unavailable');
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    void layers.initialize().then(() => layers.reminderVariant()).then(setReminderVariant);
+  }, []);
+
   // The one rule the whole day was about: an offer may never interrupt a
   // performance, so every route to the paywall goes through here.
   const showPaywall = () => {
     if (!canOfferPurchase(momentForScreen(screen))) return;
     setPaywallVisible(true);
+    void layers.track('paywall_opened', { screen });
   };
 
   const transition = (next: Screen) => {
@@ -868,6 +1003,10 @@ export default function App() {
         setBusy(true);
         transition('stage');
         await performanceProvider.open(next);
+        void layers.track('performance_started', {
+          premise_id: choice.id,
+          mode: next.serverActive && next.mode === 'live' ? 'live_ai' : 'offline_preview',
+        });
         setBusy(false);
         setRevision((value) => value + 1);
       });
@@ -878,19 +1017,83 @@ export default function App() {
 
   const advance = async () => {
     if (!performance || busy) return;
+    const forgottenBefore = new Set(performanceSnapshot(performance).forgotten.map((beat) => beat.id));
     setBusy(true);
     await performanceProvider.advance(performance);
+    const advanced = performanceSnapshot(performance);
+    advanced.forgotten
+      .filter((beat) => beat.kind === 'seed' && !forgottenBefore.has(beat.id))
+      .forEach((beat) => {
+        void layers.track('memory_seed_forgotten', {
+          premise_id: performance.session.premiseId,
+          seed_speaker: beat.speaker,
+        });
+      });
     setBusy(false);
     setRevision((value) => value + 1);
+  };
+
+  const pin = async (beatId: number) => {
+    if (!performance || busy) return;
+    setBusy(true);
+    await performanceProvider.pin(performance, beatId);
+    setBusy(false);
+    setRevision((value) => value + 1);
+  };
+
+  const direction = async (note: string): Promise<boolean> => {
+    if (!performance || busy) return false;
+    const forgottenBefore = new Set(performanceSnapshot(performance).forgotten.map((beat) => beat.id));
+    setBusy(true);
+    const accepted = await performanceProvider.direction(performance, note) !== null;
+    setBusy(false);
+    if (accepted) {
+      performanceSnapshot(performance).forgotten
+        .filter((beat) => beat.kind === 'seed' && !forgottenBefore.has(beat.id))
+        .forEach((beat) => {
+          void layers.track('memory_seed_forgotten', {
+            premise_id: performance.session.premiseId,
+            seed_speaker: beat.speaker,
+          });
+        });
+      setRevision((value) => value + 1);
+    }
+    return accepted;
   };
 
   const finish = async () => {
     if (!performance || busy) return;
     setBusy(true);
     await performanceProvider.finish(performance);
+    const completed = performanceSnapshot(performance);
+    void oneSignal.trackPerformanceCompleted({
+      premiseId: performance.session.premiseId,
+      forgottenCount: completed.forgotten.length,
+    });
+    void layers.track('performance_completed', {
+      premise_id: performance.session.premiseId,
+      mode: performance.serverActive && performance.mode === 'live' ? 'live_ai' : 'offline_preview',
+      forgotten_count: completed.forgotten.length,
+      contradiction_count: completed.contradictions.filter((item) => item.complete).length,
+      pinned_count: completed.pinnedCount,
+    });
     setBusy(false);
     setRevision((value) => value + 1);
     transition('drift');
+  };
+
+  const enableReminder = async () => {
+    if (!performance || reminderBusy) return;
+    setReminderBusy(true);
+    const status = await oneSignal.enableDailyReminder(performance.session.premiseId);
+    setReminderStatus(status);
+    if (status === 'enabled') {
+      void layers.track('daily_reminder_enabled', {
+        premise_id: performance.session.premiseId,
+        copy_variant: reminderVariant,
+      });
+    }
+    setReminderBusy(false);
   };
 
   const updateMonetization = (status: MonetizationStatus) => {
@@ -906,6 +1109,10 @@ export default function App() {
     try {
       const status = await revenueCat.purchase(pkg);
       updateMonetization(status);
+      void layers.track('purchase_completed', {
+        package_id: pkg.identifier,
+        unlimited: status.unlimited,
+      });
       // A consumable flips no entitlement, so the extra show is recorded here.
       if (isEncorePackage(pkg) && !status.unlimited && pass) {
         const current = normalizeDailyPass(ledgerFromState(pass), new Date(), false);
@@ -936,18 +1143,14 @@ export default function App() {
     setPaywallBusy(true);
     setPaywallError(null);
     try {
-      updateMonetization(await revenueCat.restore());
+      const status = await revenueCat.restore();
+      updateMonetization(status);
+      void layers.track('purchase_restored', { unlimited: status.unlimited });
     } catch (error) {
       setPaywallError(error instanceof Error ? error.message : 'Restore failed');
     } finally {
       setPaywallBusy(false);
     }
-  };
-
-  const mutate = (operation: (value: PerformanceSession) => void) => {
-    if (!performance) return;
-    operation(performance);
-    setRevision((value) => value + 1);
   };
 
   const replay = () => {
@@ -970,28 +1173,30 @@ export default function App() {
             onStart={(choice) => { void start(choice); }}
           />
         )}
-        {screen === 'stage' && session && performance && (
+        {screen === 'stage' && session && performance && currentSnapshot && (
           <Stage
             session={session}
+            snapshot={currentSnapshot}
             mode={performance.mode}
+            serverActive={performance.serverActive}
             busy={busy}
             fallbackReason={performance.lastFallbackReason}
             onAdvance={() => { void advance(); }}
-            onDirection={(note) => {
-              if (!performance) return false;
-              const accepted = performanceProvider.direction(performance, note) !== null;
-              if (accepted) setRevision((value) => value + 1);
-              return accepted;
-            }}
-            onPin={(id) => mutate((value) => { pinBeat(value.session, id); })}
+            onDirection={direction}
+            onPin={(id) => { void pin(id); }}
             onFinish={() => { void finish(); }}
             onExit={() => transition('lobby')}
           />
         )}
-        {screen === 'drift' && session && (
+        {screen === 'drift' && performance && currentSnapshot && (
           <Drift
-            session={session}
+            drift={performanceDrift(performance)}
+            memoryTokens={currentSnapshot.memoryTokens}
             houseAd={shouldShowHouseAd(momentForScreen(screen), monetization.unlimited)}
+            reminderStatus={reminderStatus}
+            reminderVariant={reminderVariant}
+            reminderBusy={reminderBusy}
+            onEnableReminder={() => { void enableReminder(); }}
             onReplay={replay}
             onNewPlay={() => transition('lobby')}
           />
@@ -1031,6 +1236,7 @@ const styles = StyleSheet.create({
   ruleTitle: { color: colors.paper, fontSize: 15, fontWeight: '800', marginBottom: 4 },
   ruleBody: { color: colors.smoke, fontSize: 13, lineHeight: 19 },
   ticket: { flex: 0.8, backgroundColor: colors.paper, padding: 26, borderRadius: 3, minWidth: 320, maxWidth: 480, alignSelf: 'center', width: '100%', shadowColor: '#000', shadowOpacity: 0.38, shadowRadius: 28, shadowOffset: { width: 0, height: 18 }, elevation: 12 },
+  ticketCompact: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
   ticketTop: { flexDirection: 'row', justifyContent: 'space-between', paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: '#c8bca8' },
   ticketKicker: { color: '#5c5245', fontSize: 10, letterSpacing: 1.9, fontWeight: '900' },
   ticketNumber: { color: '#817564', fontSize: 10, fontFamily: Platform.select({ ios: 'Courier', android: 'monospace', default: 'monospace' }) },
@@ -1077,6 +1283,9 @@ const styles = StyleSheet.create({
   houseAd: { borderWidth: 1, borderColor: colors.line, padding: 16, marginBottom: 22, backgroundColor: colors.panelSoft },
   houseAdKicker: { color: colors.smoke, fontSize: 9, letterSpacing: 1.8, fontWeight: '900' },
   houseAdCopy: { color: colors.smoke, fontSize: 12, lineHeight: 19, marginTop: 6 },
+  reminderPanel: { borderWidth: 1, borderColor: colors.goldSoft, padding: 18, marginBottom: 22, backgroundColor: '#17130c', gap: 10 },
+  reminderKicker: { color: colors.gold, fontSize: 9, letterSpacing: 1.8, fontWeight: '900' },
+  reminderCopy: { color: colors.smoke, fontSize: 12, lineHeight: 19 },
   stageShell: { flexGrow: 1, paddingHorizontal: '3.5%', paddingTop: 16, paddingBottom: 18, minHeight: '100%' },
   stageHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 18, borderBottomWidth: 1, borderBottomColor: colors.line, paddingBottom: 14 },
   backLabel: { color: colors.smoke, fontSize: 10, letterSpacing: 1.7, fontWeight: '800' },
@@ -1135,7 +1344,9 @@ const styles = StyleSheet.create({
   meterTitle: { color: colors.paper, fontSize: 9, letterSpacing: 1.7, fontWeight: '900' },
   meterValue: { color: colors.gold, fontSize: 10, fontFamily: Platform.select({ ios: 'Courier', android: 'monospace', default: 'monospace' }) },
   meterTrack: { height: 11, backgroundColor: '#29231d', overflow: 'hidden', position: 'relative' },
+  meterTrackHot: { backgroundColor: '#311b15' },
   meterFill: { height: '100%', backgroundColor: colors.gold },
+  meterFillHot: { backgroundColor: colors.ember },
   meterDangerLine: { position: 'absolute', height: '100%', width: 1, backgroundColor: colors.ember, left: '82%' },
   meterLegend: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 7 },
   meterHint: { color: '#746a5d', fontSize: 9 },
@@ -1153,6 +1364,11 @@ const styles = StyleSheet.create({
   directionPanel: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 15 },
   directionInput: { minHeight: 76, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.ink, color: colors.paper, padding: 11, textAlignVertical: 'top', fontSize: 13, lineHeight: 18 },
   directionInputDisabled: { opacity: 0.48 },
+  directionCues: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  directionCue: { borderWidth: 1, borderColor: colors.line, backgroundColor: '#191510', paddingVertical: 7, paddingHorizontal: 9 },
+  directionCueDisabled: { opacity: 0.35 },
+  directionCuePressed: { borderColor: colors.gold, backgroundColor: '#241d12' },
+  directionCueText: { color: colors.smoke, fontSize: 9, letterSpacing: 0.25 },
   directionFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 8 },
   noteCounter: { color: '#766b5e', fontSize: 9 },
   stageActions: { marginTop: 'auto', gap: 9 },

@@ -61,5 +61,4 @@ export const BUDGET_TOKENS = 1000;
 // One, deliberately. "You may save exactly one thing" is a rule you understand the
 // first time you read it. Two invites arithmetic, one invites regret, and the single
 // surviving fact stranded among the wreckage is the whole joke.
-// A rewarded ad grants a second for the current play.
 export const MAX_PINS = 1;

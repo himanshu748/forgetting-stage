@@ -9,4 +9,6 @@ artifacts/
 dist/
 web-build/
 android/.kotlin/
+output/playwright/
+.devpost-hackathon-state.json
 *.tsbuildinfo

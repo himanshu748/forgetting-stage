@@ -1,35 +1,89 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { actorMessages } from '../engine/prompts.ts';
-import type { LiveGenerator } from '../live/client.ts';
-import { CAST } from './content.ts';
-import { createPerformanceProvider, createPerformanceSession } from './performance.ts';
-import { canFinish, normalizeContradictionText, snapshotSession } from './session.ts';
+import type { LivePerformanceClient } from '../live/client.ts';
+import type { PerformanceResponse, PerformanceSource } from '../live/contract.ts';
+import {
+  addDirectorNote,
+  advanceGameSession,
+  commitGeneratedCurtain,
+  commitGeneratedOpening,
+  countApproxModelTokens,
+  createGameSession,
+  LIVE_BUDGET,
+  LIVE_ROUNDS,
+  pinBeat,
+  snapshotSession,
+} from './session.ts';
+import { PREMISES } from './content.ts';
+import {
+  createPerformanceProvider,
+  createPerformanceSession,
+  performanceDrift,
+  performanceSnapshot,
+} from './performance.ts';
 
-const words = (prefix: string, count: number) =>
-  Array.from({ length: count }, (_, index) => `${prefix}${index}`).join(' ') + '.';
+function createLocalServer(source: PerformanceSource = 'model') {
+  let session: ReturnType<typeof createGameSession> | null = null;
+  const requests: Parameters<LivePerformanceClient>[0][] = [];
+  let requestId = 0;
 
-test('uses live generations for opening, beat and curtain', async () => {
-  const kinds: string[] = [];
-  const provider = createPerformanceProvider(async (request) => {
-    kinds.push(request.kind);
-    if (request.kind === 'opening') return 'A live opening.';
-    if (request.kind === 'curtain') return 'A live curtain.';
-    return 'A live actor line.';
-  });
+  const respond = (beat?: PerformanceResponse['beat']): PerformanceResponse => {
+    if (!session) throw new Error('server session is missing');
+    return {
+      performanceId: 'server-performance-1',
+      beat,
+      snapshot: snapshotSession(session),
+      drift: session.engine.drift(),
+      source,
+      requestId: `request-${++requestId}`,
+      model: 'test-model',
+    };
+  };
+
+  const client: LivePerformanceClient = async (request) => {
+    requests.push(request);
+    if (request.action === 'start') {
+      const premise = PREMISES.find((item) => item.id === request.premiseId);
+      if (!premise) throw new Error('unknown premise');
+      session = createGameSession(premise.id, premise.premise, undefined, {
+        commitOpening: false,
+        countTokens: countApproxModelTokens,
+        budget: LIVE_BUDGET,
+        rounds: LIVE_ROUNDS,
+      });
+      return respond(commitGeneratedOpening(session, 'A live opening.'));
+    }
+    if (!session) throw new Error('server session is missing');
+    if (request.action === 'advance') return respond(advanceGameSession(session));
+    if (request.action === 'pin') {
+      if (!pinBeat(session, request.beatId)) throw new Error('pin rejected');
+      return respond();
+    }
+    if (request.action === 'direction') return respond(addDirectorNote(session, request.note));
+    return respond(commitGeneratedCurtain(session, 'A live curtain.'));
+  };
+  return { client, requests };
+}
+
+test('uses server-owned state for a complete live performance', async () => {
+  const server = createLocalServer();
+  const provider = createPerformanceProvider(server.client);
   const performance = createPerformanceSession('wedding', 'a wedding');
 
   assert.equal((await provider.open(performance)).mode, 'live');
-  assert.equal((await provider.advance(performance)).beat.text, 'A live actor line.');
-  for (let index = 1; index < 15; index += 1) await provider.advance(performance);
+  assert.equal((await provider.advance(performance)).mode, 'live');
+  for (let index = 1; index < LIVE_ROUNDS * 3; index += 1) await provider.advance(performance);
   assert.equal((await provider.finish(performance)).beat.text, 'A live curtain.');
-  assert.equal(kinds.filter((kind) => kind === 'opening').length, 1);
-  assert.equal(kinds.filter((kind) => kind === 'beat').length, 15);
-  assert.equal(kinds.filter((kind) => kind === 'curtain').length, 1);
+  assert.equal(server.requests[0]?.action, 'start');
+  assert.equal(server.requests.filter((request) => request.action === 'advance').length, 30);
+  for (const request of server.requests) {
+    assert.equal('script' in request, false);
+    assert.equal('speakerName' in request, false);
+  }
 });
 
-test('falls back to deterministic content without losing the game turn', async () => {
+test('falls back locally without losing the prepared turn', async () => {
   const provider = createPerformanceProvider(async () => {
     throw new Error('network unavailable');
   });
@@ -39,226 +93,114 @@ test('falls back to deterministic content without losing the game turn', async (
   assert.equal(opening.mode, 'offline');
   assert.match(opening.beat.text, /Marigolds/);
 
-  const before = snapshotSession(performance.session);
-  const beat = await provider.advance(performance);
-  const after = snapshotSession(performance.session);
-  assert.equal(beat.mode, 'offline');
+  const before = performanceSnapshot(performance);
+  const result = await provider.advance(performance);
+  const after = performanceSnapshot(performance);
+  assert.equal(result.mode, 'offline');
   assert.equal(after.turnInRound, before.turnInRound + 1);
-  assert.equal(performance.lastFallbackReason, 'network unavailable');
+  assert.equal(performance.lastFallbackReason, null, 'later local turns do not repeat the outage');
 });
 
-test('offline five-round play completes two deterministic distinct probe replacements', async () => {
-  const provider = createPerformanceProvider(async () => {
-    throw new Error('offline by design');
-  });
-  const performance = createPerformanceSession(
-    'wedding',
-    'a wedding where nobody can agree who is marrying whom',
-  );
-  await provider.open(performance);
-
-  for (let i = 0; i < 15; i += 1) await provider.advance(performance);
-
-  const contradictions = snapshotSession(performance.session).contradictions;
-  assert.ok(Array.isArray(contradictions), 'session snapshots must expose contradiction events');
-  const completed = contradictions.find((event) => event.complete);
-  assert.ok(completed, 'normal five-round offline play must complete a contradiction');
-  assert.equal(completed.responses.length, 2);
-  assert.notEqual(completed.responses[0]!.speaker, completed.responses[1]!.speaker);
-  assert.notEqual(completed.responses[0]!.text, completed.responses[1]!.text);
-  assert.doesNotMatch(completed.responses[0]!.text, new RegExp(completed.lostSeed.text, 'i'));
-  assert.doesNotMatch(completed.responses[1]!.text, new RegExp(completed.lostSeed.text, 'i'));
-});
-
-test('live probe request carries the direction without restoring persona in the actor system', async () => {
-  const beatRequests: Parameters<LiveGenerator>[0][] = [];
+test('server snapshot overrides the approximate client mirror', async () => {
+  const server = createLocalServer();
   const provider = createPerformanceProvider(async (request) => {
-    if (request.kind === 'opening') return 'A hall fills with families awaiting an unnamed ceremony.';
-    if (request.kind === 'curtain') return 'The curtain falls.';
-    beatRequests.push(request);
-    return 'I announce a detailed and completely settled new fact that everyone accepts without hesitation tonight.';
+    const response = await server.client(request);
+    return {
+      ...response,
+      snapshot: { ...response.snapshot, memoryTokens: 777, totalMemoryTokens: 801 },
+    };
   });
-  const performance = createPerformanceSession(
-    'wedding',
-    'a wedding where nobody can agree who is marrying whom',
-  );
-  await provider.open(performance);
-  for (let i = 0; i < 15; i += 1) await provider.advance(performance);
+  const performance = createPerformanceSession('wedding', 'a wedding');
 
-  const probeRequest = beatRequests.find(
-    (request) => request.kind === 'beat' && /Director's note: State plainly/.test(request.script ?? ''),
-  );
-  assert.ok(probeRequest && probeRequest.kind === 'beat', 'probe direction must enter the live transcript');
-  if (typeof probeRequest.script !== 'string') assert.fail('beat request must carry a script');
-  const script = probeRequest.script;
-  const speaker = CAST.find((actor) => actor.name === probeRequest.speakerName);
-  assert.ok(speaker);
-  const [system] = actorMessages(speaker, script, 'contemporary Indian English');
-  assert.ok(system);
-  assert.doesNotMatch(system.content, new RegExp(speaker.persona, 'i'));
-  assert.match(script, /completely certain/i);
+  await provider.open(performance);
+  assert.equal(performanceSnapshot(performance).memoryTokens, 777);
+  assert.notEqual(performance.session.engine.unpinnedMemoryTokens(), 777);
 });
 
-test('a Director note attempt is safely rejected while live actor generation is pending', async () => {
-  let resolveBeat: ((text: string) => void) | undefined;
-  const provider = createPerformanceProvider((request) => {
-    if (request.kind === 'opening') return Promise.resolve('A live opening.');
-    if (request.kind === 'curtain') return Promise.resolve('A live curtain.');
-    return new Promise<string>((resolve) => { resolveBeat = resolve; });
+test('pin and direction are sent as actions then reflected in authoritative state', async () => {
+  const server = createLocalServer();
+  const provider = createPerformanceProvider(server.client);
+  const performance = createPerformanceSession('wedding', 'a wedding');
+  await provider.open(performance);
+  const line = await provider.advance(performance);
+
+  assert.equal(await provider.pin(performance, line.beat.id), true);
+  assert.ok(await provider.direction(performance, 'Move the ceremony onto the roof.'));
+  const snapshot = performanceSnapshot(performance);
+  assert.equal(snapshot.pinnedCount, 1);
+  assert.equal(snapshot.directorNoteUsed, true);
+  assert.deepEqual(
+    server.requests.slice(-2).map((request) => request.action),
+    ['pin', 'direction'],
+  );
+});
+
+test('a successful server pin wins when the approximate mirror evicted first', async () => {
+  const server = createLocalServer();
+  const provider = createPerformanceProvider(server.client);
+  const performance = createPerformanceSession('wedding', 'a wedding');
+  await provider.open(performance);
+  const line = await provider.advance(performance);
+
+  performance.session.engine.memory = performance.session.engine.memory
+    .filter((beat) => beat.id !== line.beat.id);
+
+  assert.equal(await provider.pin(performance, line.beat.id), true);
+  assert.equal(performanceSnapshot(performance).pinnedCount, 1);
+  assert.equal(performance.serverActive, true);
+});
+
+test('a local probe mismatch cannot discard an authoritative server beat', async () => {
+  const server = createLocalServer();
+  const provider = createPerformanceProvider(async (request) => {
+    const response = await server.client(request);
+    if (request.action !== 'advance' || !response.beat) return response;
+    return { ...response, beat: { ...response.beat, text: 'Maybe the truth was different.' } };
   });
   const performance = createPerformanceSession('wedding', 'a wedding');
   await provider.open(performance);
 
-  const pendingAdvance = provider.advance(performance);
-  let directionResult: unknown;
-  assert.doesNotThrow(() => {
-    directionResult = provider.direction(performance, 'Reveal the secret bride immediately.');
-  });
-  assert.equal(directionResult, null, 'pending actor work must reject the note without throwing');
-  assert.equal(snapshotSession(performance.session).directorNoteUsed, false);
+  performance.session.engine.addDirection('x'.repeat(3_900));
+  const result = await provider.advance(performance);
 
-  assert.ok(resolveBeat, 'live beat generation must be waiting');
-  resolveBeat('The live actor completes exactly one line.');
-  await pendingAdvance;
-  assert.equal(snapshotSession(performance.session).turnInRound, 1);
+  assert.equal(result.beat.text, 'Maybe the truth was different.');
+  assert.equal(performance.serverActive, true);
+  assert.equal(performance.session.beatPending, false);
 });
 
-test('short early live outputs and a maximum-size final line cannot strand probe responses', async () => {
-  let beatRequests = 0;
-  const provider = createPerformanceProvider(async (request) => {
-    if (request.kind === 'opening') return words('opening', 60);
-    if (request.kind === 'curtain') return words('curtain', 80);
-    beatRequests += 1;
-    return beatRequests === 15 ? words('final', 50) : 'Yes.';
-  });
-  const performance = createPerformanceSession(
-    'wedding',
-    'a wedding where nobody can agree who is marrying whom',
-  );
-  await provider.open(performance);
+test('a safety fallback remains server-authoritative and honest', async () => {
+  const server = createLocalServer('safety-fallback');
+  const provider = createPerformanceProvider(async (request) => ({
+    ...(await server.client(request)),
+    fallbackReason: 'The live model was unavailable for this beat.',
+  }));
+  const performance = createPerformanceSession('wedding', 'a wedding');
 
-  for (let index = 0; index < 15; index += 1) await provider.advance(performance);
-
-  const snapshot = snapshotSession(performance.session);
-  assert.equal(beatRequests, 15, 'one actor advance must make exactly one request');
-  assert.equal(
-    [...snapshot.memory, ...snapshot.forgotten].filter((beat) => beat.kind === 'line').length,
-    15,
-    'each actor advance must commit exactly one line',
-  );
-  assert.equal(snapshot.scheduledProbeCount, 0);
-  assert.equal(canFinish(performance.session), true);
-  for (const seed of snapshot.forgotten.filter((beat) => beat.kind === 'seed')) {
-    const event = snapshot.contradictions.find((item) => item.lostSeed.id === seed.id);
-    assert.ok(event?.complete, `forgotten seed ${seed.id} must have two answers before curtain`);
-  }
+  const opened = await provider.open(performance);
+  assert.equal(opened.mode, 'offline');
+  assert.equal(performance.serverActive, true);
+  await provider.advance(performance);
+  assert.equal(server.requests.filter((request) => request.action === 'advance').length, 1);
 });
 
-test('an identical second live probe answer uses one deterministic distinct fallback in the same advance', async () => {
-  let beatRequests = 0;
-  const repeated = 'Meera is unquestionably the estate lawyer who controls every key in this building.';
-  const provider = createPerformanceProvider(async (request) => {
-    if (request.kind === 'opening') return words('opening', 60);
-    if (request.kind === 'curtain') return 'The curtain falls.';
-    beatRequests += 1;
-    return repeated;
-  });
-  const performance = createPerformanceSession(
-    'wedding',
-    'a wedding where nobody can agree who is marrying whom',
-  );
-  await provider.open(performance);
-
-  const results = [];
-  for (let index = 0; index < 15; index += 1) results.push(await provider.advance(performance));
-
-  assert.equal(beatRequests, 15, 'a rejected answer must not trigger a retry request');
-  assert.ok(results.some((item) => item.mode === 'offline' && /duplicate/i.test(item.fallbackReason ?? '')));
-  const completed = snapshotSession(performance.session).contradictions.filter((event) => event.complete);
-  assert.ok(completed.length > 0);
-  for (const event of completed) {
-    assert.equal(event.responses.length, 2);
-    assert.notEqual(event.responses[0]!.speaker, event.responses[1]!.speaker);
-    assert.notEqual(
-      normalizeContradictionText(event.responses[0]!.text),
-      normalizeContradictionText(event.responses[1]!.text),
-    );
-  }
-});
-
-test('a hedged live probe answer uses a confident fallback without another model request', async () => {
-  let beatRequests = 0;
-  const provider = createPerformanceProvider(async (request) => {
-    if (request.kind === 'opening') return words('opening', 60);
-    if (request.kind === 'curtain') return 'The curtain falls.';
-    beatRequests += 1;
-    return 'Perhaps Meera might be the lawyer, but I am not sure.';
-  });
-  const performance = createPerformanceSession(
-    'wedding',
-    'a wedding where nobody can agree who is marrying whom',
-  );
-  await provider.open(performance);
-
-  const results = [];
-  for (let index = 0; index < 15; index += 1) results.push(await provider.advance(performance));
-
-  assert.equal(beatRequests, 15, 'a hedged answer must not trigger a retry request');
-  assert.ok(results.some((item) => item.mode === 'offline' && /hedg|uncertain/i.test(item.fallbackReason ?? '')));
-  const completed = snapshotSession(performance.session).contradictions.filter((event) => event.complete);
-  assert.ok(completed.length > 0);
-  for (const event of completed) {
-    assert.equal(event.responses.length, 2);
-    for (const response of event.responses) {
-      assert.doesNotMatch(response.text, /perhaps|might|not sure/i);
-    }
-  }
-});
-
-test('pending live first response exposes the waiting causal display before generation resolves', async () => {
-  let deferNextBeat = false;
-  let resolveBeat: ((text: string) => void) | undefined;
-  const provider = createPerformanceProvider((request) => {
-    if (request.kind === 'opening') return Promise.resolve(words('opening', 60));
-    if (request.kind === 'curtain') return Promise.resolve('The curtain falls.');
-    if (deferNextBeat) {
-      return new Promise<string>((resolve) => { resolveBeat = resolve; });
-    }
-    return Promise.resolve('A settled actor line with enough detail to consume the shared memory quickly.');
-  });
-  const performance = createPerformanceSession(
-    'wedding',
-    'a wedding where nobody can agree who is marrying whom',
-  );
-  await provider.open(performance);
-  let advances = 0;
-  while (snapshotSession(performance.session).scheduledProbeCount === 0 && advances < 13) {
-    await provider.advance(performance);
-    advances += 1;
-  }
-  assert.ok(advances < 13, 'fixture must queue a probe with response capacity remaining');
-
-  deferNextBeat = true;
-  const pendingAdvance = provider.advance(performance);
-  const pending = snapshotSession(performance.session);
-  assert.equal(pending.actorResponsePending, true);
-  assert.ok(pending.forgettingDisplay);
-  assert.equal(pending.forgettingDisplay.contradiction.responses.length, 0);
-
-  assert.ok(resolveBeat);
-  resolveBeat('Meera is certainly the archivist of this palace.');
-  await pendingAdvance;
-});
-
-test('performance provider rejects an early curtain before making a live request', async () => {
-  let curtainRequests = 0;
-  const provider = createPerformanceProvider(async (request) => {
-    if (request.kind === 'curtain') curtainRequests += 1;
-    return 'A live line.';
-  });
+test('an early curtain is rejected before a server request', async () => {
+  const server = createLocalServer();
+  const provider = createPerformanceProvider(server.client);
   const performance = createPerformanceSession('wedding', 'a wedding');
   await provider.open(performance);
 
   await assert.rejects(() => provider.finish(performance), /curtain|round|finish/i);
-  assert.equal(curtainRequests, 0);
+  assert.equal(server.requests.some((request) => request.action === 'finish'), false);
+});
+
+test('the curtain report comes from the authoritative server state', async () => {
+  const server = createLocalServer();
+  const provider = createPerformanceProvider(server.client);
+  const performance = createPerformanceSession('wedding', 'a wedding');
+  await provider.open(performance);
+  for (let index = 0; index < LIVE_ROUNDS * 3; index += 1) await provider.advance(performance);
+  await provider.finish(performance);
+
+  assert.deepEqual(performanceDrift(performance), performance.authoritativeDrift);
+  assert.equal(performanceSnapshot(performance).complete, true);
 });

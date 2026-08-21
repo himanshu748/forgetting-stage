@@ -1,3 +1,4 @@
 <resources>
   <string name="app_name">The Forgetting Stage</string>
+  <string name="onesignal_notification_accent_color">FFE8B44F</string>
 </resources>

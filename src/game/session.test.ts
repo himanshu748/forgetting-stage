@@ -5,12 +5,15 @@ import { CAST, PREMISES } from './content.ts';
 import {
   DEMO_BUDGET,
   DEMO_ROUNDS,
+  LIVE_BUDGET,
+  LIVE_ROUNDS,
   addDirectorNote,
   advanceGameSession,
   canFinish,
   commitGeneratedBeat,
   commitGeneratedCurtain,
   commitGeneratedOpening,
+  countApproxModelTokens,
   createGameSession,
   directorNoteDraftAfterAttempt,
   finishGameSession,
@@ -233,6 +236,67 @@ test('five-round offline play completes every forgotten seed probe without stran
       assert.notEqual(event.responses[0]!.speaker, event.responses[1]!.speaker);
     }
   }
+});
+
+test('ten-round 1,000-token fallback reaches the same visible forgetting loop', () => {
+  const session = createGameSession(premise.id, premise.premise, undefined, {
+    countTokens: countApproxModelTokens,
+    budget: LIVE_BUDGET,
+    rounds: LIVE_ROUNDS,
+  });
+  for (let index = 0; index < LIVE_ROUNDS * session.engine.cast.length; index += 1) {
+    advanceGameSession(session);
+    assert.ok(snapshotSession(session).memoryTokens <= LIVE_BUDGET);
+  }
+
+  const snapshot = snapshotSession(session);
+  assert.ok(snapshot.forgotten.some((beat) => beat.kind === 'seed'));
+  assert.ok(snapshot.contradictions.some((event) => event.complete));
+  assert.equal(snapshot.canFinish, true);
+});
+
+test('a required forgetting event extends briefly then fails honestly when memory never fills', () => {
+  const session = createGameSession(premise.id, premise.premise, undefined, {
+    countTokens: () => 1,
+    budget: LIVE_BUDGET,
+    rounds: 1,
+    requiredContradictions: 1,
+    maxExtensionRounds: 1,
+  });
+
+  for (let index = 0; index < session.engine.cast.length; index += 1) {
+    advanceGameSession(session);
+  }
+  let snapshot = snapshotSession(session);
+  assert.equal(snapshot.canFinish, false);
+  assert.equal(snapshot.canAdvance, true, 'one recovery round should remain available');
+  assert.equal(snapshot.failureReason, null);
+
+  for (let index = 0; index < session.engine.cast.length; index += 1) {
+    advanceGameSession(session);
+  }
+  snapshot = snapshotSession(session);
+  assert.equal(snapshot.canFinish, false);
+  assert.equal(snapshot.canAdvance, false);
+  assert.match(snapshot.failureReason ?? '', /did not produce|start a new/i);
+  assert.throws(() => advanceGameSession(session), /configured actor rounds/i);
+});
+
+test('an authoritative server may force the approximate mirror into a recovery round', () => {
+  const session = createGameSession(premise.id, premise.premise, undefined, {
+    countTokens: () => 1,
+    budget: LIVE_BUDGET,
+    rounds: 1,
+    maxExtensionRounds: 1,
+  });
+  for (let index = 0; index < session.engine.cast.length; index += 1) {
+    advanceGameSession(session);
+  }
+  assert.equal(snapshotSession(session).canAdvance, false);
+
+  const prepared = prepareGameBeat(session, { forceRecoveryRound: true });
+  assert.equal(session.maxRounds, 2);
+  assert.equal(prepared.speaker.name, 'Meera');
 });
 
 test('a maximum-size final actor line preserves seeds that no remaining actors can answer', () => {

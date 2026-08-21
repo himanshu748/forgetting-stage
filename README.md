@@ -3,8 +3,7 @@
 **A story machine where an AI cast improvises a play inside a deliberately small shared memory,
 and you choose the one thing they are allowed to keep.**
 
-Successor to [Thousand-Token Theater](https://huggingface.co/spaces/build-small-hackathon/thousand-token-theater),
-which won the Build Small Hackathon. Entry for RevenueCat Shipaton 2026.
+Successor to the original [Thousand-Token Theater repository](https://github.com/himanshu748/build-small-hackathon-thousand-token-theater) and [Hugging Face Space](https://huggingface.co/spaces/build-small-hackathon/thousand-token-theater), which won the Build Small Hackathon. Entry for RevenueCat Shipaton 2026.
 
 The cast shares a bounded memory. As the play runs the oldest beats fall out, and the
 next two actors receive the same structured probe about a genuinely erased seed. Each
@@ -30,17 +29,35 @@ npm start
 
 Use `npm run ios`, `npm run android` or `npm run web` for a specific platform. During a play you can pin exactly one actor line, spend one director note, watch shared memory evict its oldest facts and compare each actor's first and final certainty at curtain.
 
-## Live AI gateway
+### Android native workflow
 
-The mobile client calls the narrow `POST /api/generate` contract. The server validates the premise and speaker against the shipped game content, reconstructs system prompts itself, caps body and script sizes, enforces a 30-request-per-minute shared capacity cap per serverless instance, applies a provider timeout and returns safe errors. It deliberately does not trust caller-supplied forwarding headers as identity. `HF_TOKEN` remains server-only.
+This repository intentionally commits `android/` because the development client and sponsor SDKs contain native code. Expo Go is not a valid test environment for RevenueCat, Layers or OneSignal. Use `npx expo run:android` or the checked-in Gradle project for a local development build.
 
-That in-memory cap is not deployment-wide authorization. Before exposing the gateway publicly, add a durable shared quota or server-verifiable performance authorization and set a hard provider spending limit. The repository does not claim those deployment controls are configured.
+When a native directory is committed, EAS does not copy native-facing `app.json` fields into it. The Android project is therefore the build source of truth. Its package ID, version, portrait orientation, dark launch background, adaptive icon, deep-link scheme and plugin resources are maintained alongside `app.json`. The corresponding Expo Doctor sync warning is disabled in `package.json` for this deliberate workflow, not because those fields are ignored.
 
 ```bash
-HF_TOKEN=hf_xxx MODEL=meta-llama/Llama-3.1-8B-Instruct npx vercel dev
+npx expo install --check
+npx expo-modules-autolinking verify --platform android
+npx expo run:android
 ```
 
-Deploy the Expo web output and `api/generate.ts` on a host that supports TypeScript serverless functions, or place the same handler behind your mobile API domain. Web can use its same-origin `/api/generate` route; iOS and Android require an absolute HTTPS URL for the deployed gateway:
+The observed local API 36 build and emulator preflight are recorded separately from physical-device submission evidence in [docs/submission/device-validation.md](docs/submission/device-validation.md). EAS builds must only be started after confirming they will consume no paid minutes.
+
+## Live AI gateway
+
+The mobile client calls the narrow `POST /api/generate` action contract. It may ask to start, advance, pin, direct or finish. It cannot send a transcript, choose a speaker or restore an erased fact. The server creates the performance, owns every canonical beat and builds each model prompt exclusively from the post-eviction server snapshot.
+
+Live memory uses the tokenizer for the same model ID sent to Hugging Face. The zero-dependency `@huggingface/tokenizers` package counts text with special tokens disabled, matching the original Thousand-Token Theater method. All unpinned shared memory is capped at exactly 1,000 model tokens. The one pinned actor line lives outside that allowance and never evicts. A normal live play is ten rounds, or thirty actor beats. The curtain stays locked until at least one erased seed receives two distinct confident replacements. Exceptionally short output can add at most two recovery rounds, then the app surfaces an honest retry state instead of claiming that forgetting occurred.
+
+The gateway caps request bodies, applies a provider timeout, rejects transcript or speaker fields and returns safe errors. It uses a 40-request-per-minute shared capacity bucket per server process, enough for one complete play plus its state-only actions, and never trusts caller-supplied forwarding headers as identity. `HF_TOKEN` remains server-only.
+
+The checked-in session store and rate limiter are process-local. They are suitable for a single persistent preview process, but not a horizontally scaled production deployment where requests can reach different instances. Before public production exposure, replace both with a durable shared store and quota or a server-verifiable signed performance state. Set a hard provider spending limit too. This repository does not claim those deployment controls are configured.
+
+```bash
+HF_TOKEN=hf_xxx MODEL=Qwen/Qwen3-4B-Instruct-2507 npx vercel dev
+```
+
+Run `api/generate.ts` in one persistent preview process or adapt its store to durable shared storage before using a serverless fleet. Web can use its same-origin `/api/generate` route. iOS and Android require an absolute HTTPS URL for the deployed gateway:
 
 ```bash
 EXPO_PUBLIC_GENERATION_ENDPOINT=https://api.example.com/api/generate
@@ -71,6 +88,20 @@ These are RevenueCat public SDK keys intended for the app bundle, not secret Rev
 
 The one-free-performance ledger is stored locally and resets on the next local calendar day. Director's Pass holders bypass the ledger. RevenueCat's Test Store can simulate success, failure and cancellation, but real native purchase testing requires an Expo development build rather than ordinary Expo Go. Never ship a Test Store API key in a production build.
 
+## Retention and growth loop
+
+The native app contains two optional sponsor integrations. Neither changes the core play when it is unconfigured.
+
+- OneSignal asks for notification permission only after the player taps the reminder at curtain. A successful opt-in tags the daily-curtain audience and the last premise. The dashboard must still deploy at least one real campaign before the OneSignal track is eligible.
+- Layers records performance starts, genuine seed eviction, curtain completion, reminder opt-in and box-office events. The `curtain_reminder_copy` feature flag supports a focused `free_show` versus `curiosity` copy experiment. The SDK does not request App Tracking Transparency on launch. A real App ID, verified native events and an observed experiment result are still required before claiming the Layers track.
+
+```bash
+EXPO_PUBLIC_ONESIGNAL_APP_ID=your-public-app-id
+EXPO_PUBLIC_LAYERS_APP_ID=your-public-app-id
+```
+
+The evidence and eligibility gates for every prize target are tracked in [docs/submission/track-strategy.md](docs/submission/track-strategy.md).
+
 ## Engine and experiments
 
 The deterministic test suite needs no API key. Live spikes, plays and experiments use Hugging Face Inference.
@@ -79,9 +110,7 @@ The deterministic test suite needs no API key. Live spikes, plays and experiment
 npm test
 ```
 
-Proves the configured memory cap, pin mechanic and two-response probe chain with no
-network. The engine takes `countTokens` as an injected dependency, so eviction is
-verifiable without claiming that every production model tokenizer measures text identically.
+Proves the configured memory cap, pin mechanic, server-owned action contract and two-response probe chain with no network. Production loads the exact serving-model tokenizer. The offline preview uses an explicit approximation and labels its meter `EST. TOKENS` instead of pretending it is exact.
 
 ```bash
 HF_TOKEN=hf_xxx npm run spike
@@ -122,9 +151,13 @@ App.tsx                    Expo game: lobby, live stage and drift report
 src/game/content.ts        Premises, cast and deterministic demo performances
 src/game/session.ts        Frontend game loop around the pure engine
 src/game/performance.ts    Live generation provider with offline fallback
-src/live/gateway.ts        Server-only validation, rate limits and model calls
+src/live/gateway.ts        Server-owned performance loop, validation and model calls
+src/live/tokenizer.ts      Exact serving-model token counter
+src/live/performance-store.ts  Preview performance state and expiry
 src/monetization/           Daily refresh ledger and RevenueCat adapter
-api/generate.ts            Serverless live-generation entry point
+src/engagement/onesignal.ts Opt-in daily curtain reminder
+src/analytics/layers.ts    Growth events and curtain-copy experiment
+api/generate.ts            HTTP live-generation entry point
 src/engine/theater.test.ts Proof the cap and pins are real
 src/experiments/matched.ts Reusable forgetting vs control orchestration
 src/experiments/run.ts      Live experiment CLI and JSON artifact writer
@@ -138,7 +171,7 @@ and drift is derived from beat attribution so it needs no extra model call.
 
 ## Status
 
-The native Expo game, pure memory engine, matched experiment backend, secure live-generation gateway, daily free curtain and RevenueCat Director's Pass integration are implemented. Production launch still requires a real RevenueCat project and store products, a deployed generation endpoint, platform API keys and native EAS/store builds.
+The native Expo game, pure memory engine, matched experiment backend, server-authoritative live-generation loop, exact serving-model tokenizer, daily free curtain, RevenueCat adapter, OneSignal reminder and Layers experiment hook are implemented. Local Android API 36 debug and release-mode builds pass, and an emulator fresh-install preflight reaches the honestly labeled offline performance. Unit and integration tests do not prove external dashboards, live model inference or a physical-device run. Submission still requires a real RevenueCat project and product, an observed Test Store purchase and restore, a deployed persistent generation endpoint, OneSignal and Layers App IDs, native build evidence, student proof for Next Gen and the required public video.
 
 ## Licence
 
