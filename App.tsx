@@ -1146,6 +1146,12 @@ export default function App() {
       const status = await revenueCat.restore();
       updateMonetization(status);
       void layers.track('purchase_restored', { unlimited: status.unlimited });
+      if (status.unlimited) {
+        setPaywallVisible(false);
+        setAccessMessage("Director's Pass restored. Unlimited performances are active.");
+      } else {
+        setPaywallError("No active Director's Pass was found to restore.");
+      }
     } catch (error) {
       setPaywallError(error instanceof Error ? error.message : 'Restore failed');
     } finally {

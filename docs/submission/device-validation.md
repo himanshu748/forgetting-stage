@@ -11,7 +11,8 @@ Observed on 21 August 2026 with Expo SDK 57.0.15 and the official Expo developme
 - A separate release-mode bundle built successfully. An emulator-only copy was zip-aligned and signed with the checked-in debug certificate so it could be launched without Metro. Artifact: 31 MB, SHA-256 `1024508a99a3c7b3623477edc168e69b40bc897ec70763109e9a53441189486b`. Do not distribute this artifact as a release.
 - The `fs_pixel` Android 16 emulator cold-launched the app, granted a fresh daily curtain, entered a performance and advanced from Meera to Arun without a fatal native or React Native error.
 - With no generation endpoint configured, the app visibly reported `OFFLINE PREVIEW`, labeled the local counter `EST. TOKENS` and explained that live AI was unavailable. This proves fallback honesty, not live AI, a Layers event or a OneSignal campaign.
-- Metro later launched the development client with the ignored local RevenueCat Test Store configuration. The current offering returned the encore and Director's Pass packages. A simulated valid `monthly` purchase activated `directors_pass` in the app and appeared in the RevenueCat sandbox customer history. No real payment occurred.
+- Metro later launched the development client with the ignored local RevenueCat Test Store configuration. The current offering returned the encore and Director's Pass packages. A simulated valid `monthly` purchase activated `directors_pass` in the app. After an app-data reset, a simulated valid `encore_ticket` purchase was recorded as an unattached consumable and granted a local encore. Both appeared in RevenueCat sandbox customer history. No real payment occurred.
+- A reinstall-style app-data reset and Restore purchases attempt did not reactivate the short Test Store subscription. The app now reports that no active pass was found instead of failing silently. This remains a failed restore observation, not restore evidence.
 - The physical-device and configured-service evidence below remains required. The emulator observation is not a substitute for the required target-device video or reinstall-and-restore proof.
 
 ## Submission record, fill after observation
@@ -22,7 +23,7 @@ Observed on 21 August 2026 with Expo SDK 57.0.15 and the official Expo developme
 - OneSignal App ID and campaign: `TODO: record only after a message is deployed and received`
 - Layers App ID and experiment: `TODO: record only after native events are observed`
 - Android development build evidence: `Local emulator preflight recorded above; TODO: record the physical-device artifact hash or a confirmed zero-cost EAS URL`
-- Test Store product or package: current `default` offering with `encore_ticket`, `monthly`, `yearly` and `lifetime`; simulated `monthly` purchase observed on the Android 16 emulator
+- Test Store product or package: current `default` offering with `encore_ticket`, `monthly`, `yearly` and `lifetime`; simulated `monthly` and `encore_ticket` purchases observed on the Android 16 emulator
 - Public media URL: `TODO: add the published demo video URL`
 
 The checked-in app does not expose dashboard keys or establish that the remaining external services are configured. A Test Store key is for development and preview builds only, never an app-store release. This project declares `react-native-purchases` 10.6.0, which meets Test Store's React Native SDK minimum of 9.5.4. EAS preview builds use EAS-managed Android credentials. Direct release builds do not select the debug certificate by default. The optional `-PallowDebugReleaseSigning=true` property exists only for local emulator validation and its APK must never be distributed as a release.

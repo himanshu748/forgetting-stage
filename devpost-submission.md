@@ -105,6 +105,7 @@ Observed locally on 21 August 2026:
 - An Android 16 emulator fresh launch opened the daily ticket, entered the offline performance and advanced Meera to Arun without a fatal error
 - A RevenueCat Test Store offering loaded in the native development client, a simulated monthly Director's Pass purchase completed and the app displayed `DIRECTOR'S PASS ACTIVE`
 - RevenueCat customer history recorded the sandbox subscription and both the configured `directors_pass` entitlement and the temporary setup-wizard entitlement became active
+- After an app-data reset, a simulated `encore_ticket` purchase completed and RevenueCat recorded it as an unattached consumable. A restore attempt found no active short subscription, so physical-device restore remains unverified.
 - Gitleaks found no committed secrets
 
 ## Public Demo Link
@@ -159,7 +160,7 @@ Official deadline: 1 October 2026 at 06:45 UTC, which is 30 September 2026 at 11
 
 - No paid live model completion was invoked during the zero-spend validation pass.
 - The live HTTPS gateway is not deployed and its state store is process-local.
-- RevenueCat project `4c98413b`, the current Test Store offering, the `directors_pass` entitlement, encore product and a simulated native subscription purchase are configured and observed. Restore is covered by automated tests but has not been observed after a physical-device reinstall.
+- RevenueCat project `4c98413b`, the current Test Store offering, the `directors_pass` entitlement plus simulated native subscription and encore purchases are configured and observed. Restore is covered by automated tests but has not been observed after a physical-device reinstall.
 - OneSignal has no verified App ID, FCM setup, deployed campaign or received notification.
 - Layers has no verified App ID, dashboard event or observed experiment response.
 - The emulator preflight is not a physical target-device test.
@@ -222,7 +223,7 @@ Public progress links:
 
 ### HAMM Award
 
-The Forgetting Stage uses a three-tier theatre model. Every player gets one complete performance each local day, which makes the core loop understandable before any purchase. An `encore_ticket` is a consumable extra show for occasional players. The `directors_pass` entitlement unlocks unlimited performances for frequent players. The box office can open in the lobby or after the curtain, but a showtime guard prevents purchase offers from interrupting an active play. This structure fits a short replayable improv game: scarcity creates anticipation, the encore matches a one-more-run impulse and the pass serves repeat use without withholding the first experience. RevenueCat project `4c98413b` has monthly, annual, lifetime and encore Test Store products. A simulated monthly native purchase activated the entitlement on Android. There is no real revenue or conversion result yet, so none is claimed.
+The Forgetting Stage uses a three-tier theatre model. Every player gets one complete performance each local day, which makes the core loop understandable before any purchase. An `encore_ticket` is a consumable extra show for occasional players. The `directors_pass` entitlement unlocks unlimited performances for frequent players. The box office can open in the lobby or after the curtain, but a showtime guard prevents purchase offers from interrupting an active play. This structure fits a short replayable improv game: scarcity creates anticipation, the encore matches a one-more-run impulse and the pass serves repeat use without withholding the first experience. RevenueCat project `4c98413b` has monthly, annual, lifetime and encore Test Store products. A simulated monthly native purchase activated the entitlement on Android, and a separate simulated `encore_ticket` purchase was recorded as a consumable. There is no real revenue or conversion result yet, so none is claimed.
 
 ### RevenueCat Design Award
 
