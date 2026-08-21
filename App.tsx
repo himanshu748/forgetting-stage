@@ -52,6 +52,7 @@ import {
   consumeSessionEncore,
   createPerformanceLaunchGate,
   recordPurchasedEncore,
+  settlePerformanceConsumption,
 } from './src/monetization/launch.ts';
 import {
   createRevenueCatClient,
@@ -849,12 +850,16 @@ export default function App() {
             pass: currentPass,
             saveLedger: (nextLedger) => ledgerStorage.save(nextLedger),
           });
-          if (consumption.status === 'persistence-error') {
-            setLedgerAvailable(false);
+          const settled = settlePerformanceConsumption(
+            consumption,
+            ledgerAvailable === true,
+          );
+          if (!settled.admitted) {
+            setLedgerAvailable(settled.ledgerAvailable);
             setAccessMessage('The curtain stayed up because today’s ticket could not be saved. No performance was spent.');
             return;
           }
-          admittedPass = consumption.pass;
+          admittedPass = settled.pass;
         }
         setPass(admittedPass);
 

@@ -7,6 +7,7 @@ import {
   consumeSessionEncore,
   createPerformanceLaunchGate,
   recordPurchasedEncore,
+  settlePerformanceConsumption,
 } from './launch.ts';
 
 const now = new Date(2026, 7, 21, 10, 0, 0);
@@ -57,6 +58,43 @@ test('a failed consumption save keeps the original in-memory access', async () =
 
   assert.equal(result.status, 'persistence-error');
   assert.deepEqual(result.pass, availablePass);
+});
+
+test('a failed known-ticket save stays retryable and admits exactly once after success', async () => {
+  let saveAttempts = 0;
+  let admissions = 0;
+  let state = { pass: availablePass, ledgerAvailable: true };
+  const attempt = async () => {
+    const result = await consumeAndPersistPerformance({
+      pass: state.pass,
+      saveLedger: async () => {
+        saveAttempts += 1;
+        if (saveAttempts === 1) throw new Error('temporary write failure');
+      },
+      now,
+    });
+    const settled = settlePerformanceConsumption(result, state.ledgerAvailable);
+    state = { pass: settled.pass, ledgerAvailable: settled.ledgerAvailable };
+    if (settled.admitted) {
+      admissions += 1;
+    }
+    return settled;
+  };
+
+  const first = await attempt();
+  assert.equal(first.admitted, false);
+  assert.equal(state.ledgerAvailable, true);
+  assert.equal(state.pass.remaining, 1);
+  assert.equal(state.pass.used, 0);
+  assert.equal(admissions, 0);
+
+  const second = await attempt();
+  assert.equal(second.admitted, true);
+  assert.equal(state.ledgerAvailable, true);
+  assert.equal(state.pass.remaining, 0);
+  assert.equal(state.pass.used, 1);
+  assert.equal(saveAttempts, 2);
+  assert.equal(admissions, 1);
 });
 
 test('a purchased encore reports successful persistence separately', async () => {

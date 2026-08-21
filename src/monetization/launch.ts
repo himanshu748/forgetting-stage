@@ -35,6 +35,24 @@ export type ConsumeAndPersistResult =
   | { status: 'consumed'; pass: DailyPassState }
   | { status: 'persistence-error'; pass: DailyPassState };
 
+export type SettledPerformanceConsumption = {
+  pass: DailyPassState;
+  ledgerAvailable: boolean;
+  admitted: boolean;
+};
+
+/** A failed write does not invalidate the successful ledger read before it. */
+export function settlePerformanceConsumption(
+  result: ConsumeAndPersistResult,
+  ledgerAvailable: boolean,
+): SettledPerformanceConsumption {
+  return {
+    pass: result.pass,
+    ledgerAvailable,
+    admitted: result.status === 'consumed',
+  };
+}
+
 export async function consumeAndPersistPerformance({
   pass,
   saveLedger,
