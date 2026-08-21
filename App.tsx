@@ -77,7 +77,7 @@ type ButtonProps = {
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  variant?: 'gold' | 'ghost' | 'danger';
+  variant?: 'gold' | 'ghost' | 'ticket' | 'danger';
   accessibilityLabel?: string;
 };
 
@@ -111,6 +111,7 @@ function ActionButton({
       style={({ pressed }) => [
         styles.actionButton,
         variant === 'ghost' && styles.actionGhost,
+        variant === 'ticket' && styles.actionTicket,
         variant === 'danger' && styles.actionDanger,
         disabled && styles.actionDisabled,
         pressed && !disabled && styles.actionPressed,
@@ -120,6 +121,7 @@ function ActionButton({
         style={[
           styles.actionLabel,
           variant === 'ghost' && styles.actionGhostLabel,
+          variant === 'ticket' && styles.actionTicketLabel,
           variant === 'danger' && styles.actionDangerLabel,
         ]}
       >
@@ -244,7 +246,7 @@ function Lobby({
                 else onShowPaywall();
               }}
             />
-            {!pass?.unlimited && <ActionButton label="View Director's Pass" variant="ghost" onPress={onShowPaywall} />}
+            {!pass?.unlimited && <ActionButton label="View Director's Pass" variant="ticket" onPress={onShowPaywall} />}
             <Text style={styles.demoNote}>A RevenueCat entitlement unlocks unlimited performances. Offline preview remains available.</Text>
           </View>
         </View>
@@ -736,7 +738,7 @@ export default function App() {
       toValue: 0,
       duration: 120,
       easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start(({ finished }) => {
       if (!finished) return;
       setScreen(next);
@@ -744,7 +746,7 @@ export default function App() {
         toValue: 1,
         duration: 260,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     });
   };
@@ -937,11 +939,13 @@ const styles = StyleSheet.create({
   castName: { color: '#3d352b', fontSize: 12, fontWeight: '800' },
   actionButton: { minHeight: 48, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.gold, borderWidth: 1, borderColor: colors.gold },
   actionGhost: { backgroundColor: 'transparent', borderColor: colors.line },
+  actionTicket: { backgroundColor: 'transparent', borderColor: '#8a7d69' },
   actionDanger: { backgroundColor: colors.ember, borderColor: colors.ember },
   actionDisabled: { opacity: 0.35 },
   actionPressed: { transform: [{ translateY: 1 }], opacity: 0.9 },
   actionLabel: { color: colors.ink, fontSize: 12, letterSpacing: 1.3, fontWeight: '900', textTransform: 'uppercase' },
   actionGhostLabel: { color: colors.paper },
+  actionTicketLabel: { color: '#2b241c' },
   actionDangerLabel: { color: '#fff8ef' },
   demoNote: { color: '#786c5a', fontSize: 10, textAlign: 'center', marginTop: 12 },
   dailyPassPanel: { borderWidth: 1, borderColor: '#c8bca8', padding: 12, marginBottom: 12, backgroundColor: '#eee2ce' },
