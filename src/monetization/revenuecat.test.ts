@@ -47,7 +47,7 @@ test('configures once, exposes offerings and unlocks after purchase', async () =
   };
   const client = createRevenueCatClient({
     platform: 'ios',
-    env: { EXPO_PUBLIC_REVENUECAT_TEST_API_KEY: 'test_public_key' },
+    publicKeys: { test: 'test_public_key', useTestStore: true },
     loadPurchases: async () => ({ default: module }),
   });
   const status = await client.status();
@@ -63,7 +63,7 @@ test('configures once, exposes offerings and unlocks after purchase', async () =
 test('stays unconfigured when no public SDK key exists', async () => {
   const client = createRevenueCatClient({
     platform: 'android',
-    env: {},
+    publicKeys: {},
     loadPurchases: async () => { throw new Error('must not load'); },
   });
   assert.deepEqual(await client.status(), { configured: false, unlimited: false, packages: [] });

@@ -1,3 +1,8 @@
+import {
+  resolveRevenueCatPublicKey,
+  type RevenueCatPublicKeys,
+} from '../config/public.ts';
+
 export const DIRECTORS_PASS_ENTITLEMENT = 'directors_pass';
 
 export type DirectorPackage = {
@@ -52,13 +57,6 @@ export function isEncorePackage(pkg: DirectorPackage): boolean {
   return `${pkg.identifier} ${pkg.title}`.toLowerCase().includes('encore');
 }
 
-function publicKeyForPlatform(platform: string, env: Record<string, string | undefined>): string | null {
-  if (env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY) return env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY;
-  if (platform === 'ios') return env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ?? null;
-  if (platform === 'android') return env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY ?? null;
-  return null;
-}
-
 function mapPackage(pkg: PurchasesPackage): DirectorPackage {
   return {
     identifier: pkg.identifier ?? 'directors-pass',
@@ -71,15 +69,14 @@ function mapPackage(pkg: PurchasesPackage): DirectorPackage {
 
 export function createRevenueCatClient(opts: {
   platform: string;
-  env?: Record<string, string | undefined>;
+  publicKeys: RevenueCatPublicKeys;
   loadPurchases: () => Promise<{ default?: PurchasesModule } | PurchasesModule>;
 }) {
-  const env = opts.env ?? process.env;
   let purchases: PurchasesModule | null = null;
   let initialized = false;
 
   async function module(): Promise<PurchasesModule | null> {
-    const key = publicKeyForPlatform(opts.platform, env);
+    const key = resolveRevenueCatPublicKey(opts.platform, opts.publicKeys);
     if (!key || opts.platform === 'web') return null;
     if (!purchases) {
       const loaded = await opts.loadPurchases();

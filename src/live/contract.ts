@@ -1,19 +1,32 @@
-export const GENERATION_KINDS = ['opening', 'beat', 'curtain'] as const;
+import type { Beat, Drift } from '../engine/types.ts';
+import type { SessionSnapshot } from '../game/session.ts';
 
-export type GenerationKind = (typeof GENERATION_KINDS)[number];
+export const PERFORMANCE_ACTIONS = ['start', 'advance', 'pin', 'direction', 'finish'] as const;
 
-export type GenerationRequest = {
-  kind: GenerationKind;
-  premiseId: string;
+export type PerformanceAction = (typeof PERFORMANCE_ACTIONS)[number];
+
+/**
+ * Public clients submit intent only. Transcript, speaker order, memory pressure
+ * and probe history live behind the gateway.
+ */
+export type PerformanceRequest =
+  | { action: 'start'; premiseId: string }
+  | { action: 'advance'; performanceId: string }
+  | { action: 'pin'; performanceId: string; beatId: number }
+  | { action: 'direction'; performanceId: string; note: string }
+  | { action: 'finish'; performanceId: string };
+
+export type PerformanceSource = 'model' | 'safety-fallback' | 'state-only';
+
+export type PerformanceResponse = {
   performanceId: string;
-  script?: string;
-  speakerName?: string;
-};
-
-export type GenerationResponse = {
-  text: string;
+  beat?: Beat;
+  snapshot: SessionSnapshot;
+  drift: Drift;
+  source: PerformanceSource;
   requestId: string;
-  model?: string;
+  model: string;
+  fallbackReason?: string;
 };
 
 export type GenerationError = {
@@ -22,8 +35,9 @@ export type GenerationError = {
   requestId?: string;
 };
 
-export const MAX_SCRIPT_CHARS = 12_000;
+export const MAX_NOTE_CHARS = 120;
 
-export function isGenerationKind(value: unknown): value is GenerationKind {
-  return typeof value === 'string' && GENERATION_KINDS.includes(value as GenerationKind);
+export function isPerformanceAction(value: unknown): value is PerformanceAction {
+  return typeof value === 'string'
+    && PERFORMANCE_ACTIONS.includes(value as PerformanceAction);
 }

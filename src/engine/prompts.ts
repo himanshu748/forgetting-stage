@@ -3,6 +3,7 @@ import type { Character, ChatMessage } from './types.ts';
 export const NARRATOR: Character = {
   name: 'The Narrator',
   emoji: '🎙️',
+  style: 'velvet-voiced, evocative, and concise',
   persona:
     'the velvet voice of the play who sets scenes in one or two evocative sentences ' +
     'and never speaks as the characters',
@@ -60,7 +61,7 @@ export function actorMessages(
   register: string,
 ): ChatMessage[] {
   const system = [
-    `You are ${speaker.name}, ${speaker.persona}.`,
+    `You are ${speaker.name}. Your delivery is ${speaker.style ?? 'confident and direct'}.`,
     `You are one actor in a troupe improvising a LIVE one-act play. Rules:`,
     `- Speak ONLY as ${speaker.name}; never write another character's lines.`,
     `- Reply with ONE short sentence (about 25 words MAX). Fast improv, not a monologue.`,

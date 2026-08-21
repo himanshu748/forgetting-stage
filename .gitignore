@@ -1,5 +1,6 @@
 node_modules/
 .env
+.env.local
 .DS_Store
 build-in-public/
 PRD.md
@@ -8,4 +9,7 @@ artifacts/
 .expo/
 dist/
 web-build/
+android/.kotlin/
+output/playwright/
+.devpost-hackathon-state.json
 *.tsbuildinfo

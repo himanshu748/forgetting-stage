@@ -16,6 +16,24 @@ export type Character = {
   name: string;
   emoji: string;
   persona: string;
+  /** Delivery cues only; identity facts stay in shared-memory persona seeds. */
+  style?: string;
+};
+
+export type MemoryProbe = {
+  lostSeed: Beat;
+  instruction: string;
+  responseIndex: number;
+  responseCount: number;
+};
+
+/**
+ * Optional live-session pacing state. The engine reads this object while
+ * evicting; callers that omit it retain the original oldest-first behavior.
+ */
+export type SeedResponseReservation = {
+  remainingActorSlots: number;
+  preparedProbeResponses: number;
 };
 
 export type ChatMessage = {
@@ -43,5 +61,4 @@ export const BUDGET_TOKENS = 1000;
 // One, deliberately. "You may save exactly one thing" is a rule you understand the
 // first time you read it. Two invites arithmetic, one invites regret, and the single
 // surviving fact stranded among the wreckage is the whole joke.
-// A rewarded ad grants a second for the current play.
 export const MAX_PINS = 1;

@@ -29,6 +29,8 @@ import {
   type ChatMessage,
   type CountTokens,
   type Drift,
+  type MemoryProbe,
+  type SeedResponseReservation,
 } from './types.ts';
 
 export function scriptLine(beat: Beat): string {
@@ -45,11 +47,12 @@ export class TheaterEngine {
   readonly budget: number;
   private readonly countTokens: CountTokens;
   private readonly register: string;
+  private readonly seedResponseReservation?: SeedResponseReservation;
 
   memory: Beat[] = [];
   forgotten: Beat[] = [];
   lastForgotten: Beat[] = [];
-  private probes: string[] = [];
+  private probes: MemoryProbe[] = [];
   private turn = 0;
   private nextId = 0;
   private allBeats: Beat[] = [];
@@ -59,11 +62,13 @@ export class TheaterEngine {
     countTokens: CountTokens;
     budget?: number;
     register?: string;
+    seedResponseReservation?: SeedResponseReservation;
   }) {
     this.cast = [...opts.cast];
     this.countTokens = opts.countTokens;
     this.budget = opts.budget ?? BUDGET_TOKENS;
     this.register = REGISTERS[opts.register ?? DEFAULT_REGISTER] ?? REGISTERS[DEFAULT_REGISTER]!;
+    this.seedResponseReservation = opts.seedResponseReservation;
   }
 
   // ---- memory ------------------------------------------------------------ //
@@ -76,8 +81,18 @@ export class TheaterEngine {
     return this.memory.length ? this.countTokens(this.transcript()) : 0;
   }
 
+  /**
+   * The advertised limit applies to forgettable memory. A player's single
+   * pinned truth sits outside that allowance, otherwise pinning a long line
+   * could make the engine claim a cap it cannot actually maintain.
+   */
+  unpinnedMemoryTokens(): number {
+    const unpinned = this.memory.filter((beat) => !beat.pinned);
+    return unpinned.length ? this.countTokens(this.transcript(unpinned)) : 0;
+  }
+
   budgetFraction(): number {
-    return Math.min(1, this.memoryTokens() / this.budget);
+    return Math.min(1, this.unpinnedMemoryTokens() / this.budget);
   }
 
   pinnedCount(): number {
@@ -100,15 +115,43 @@ export class TheaterEngine {
 
     // Evict oldest UNPINNED beats until we fit. A play made entirely of pinned
     // beats can exceed budget; that is correct, the player chose it.
-    while (this.memoryTokens() > this.budget) {
-      const victim = this.memory.findIndex((b) => !b.pinned && b.id !== beat.id);
+    while (this.unpinnedMemoryTokens() > this.budget) {
+      const oldest = this.memory.findIndex((b) => !b.pinned && b.id !== beat.id);
+      if (oldest === -1) break;
+      const oldestBeat = this.memory[oldest];
+      const seedHasCapacity = oldestBeat?.kind !== 'seed' || this.canReserveSeedResponses();
+      const victim = seedHasCapacity
+        ? oldest
+        : this.memory.findIndex(
+          (candidate) => !candidate.pinned && candidate.id !== beat.id && candidate.kind !== 'seed',
+        );
       if (victim === -1) break;
       const [dropped] = this.memory.splice(victim, 1);
       if (!dropped) break;
       this.forgotten.push(dropped);
       this.lastForgotten.push(dropped);
-      if (dropped.kind === 'seed') this.probes.push(probeFor(dropped));
+      if (dropped.kind === 'seed') {
+        const instruction = probeFor(dropped);
+        for (let responseIndex = 1; responseIndex <= 2; responseIndex += 1) {
+          this.probes.push({
+            lostSeed: { ...dropped },
+            instruction,
+            responseIndex,
+            responseCount: 2,
+          });
+        }
+      }
     }
+  }
+
+  private canReserveSeedResponses(): boolean {
+    if (!this.seedResponseReservation) return true;
+    const remainingActorSlots = Math.max(0, this.seedResponseReservation.remainingActorSlots);
+    const preparedProbeResponses = Math.max(
+      0,
+      this.seedResponseReservation.preparedProbeResponses,
+    );
+    return this.probes.length + preparedProbeResponses + 2 <= remainingActorSlots;
   }
 
   private newBeat(
@@ -173,8 +216,13 @@ export class TheaterEngine {
    * they no longer have is what turns eviction into a contradiction on stage.
    * Returns null when nothing has been lost since the last probe.
    */
-  nextProbe(): string | null {
-    return this.probes.shift() ?? null;
+  nextProbe(): MemoryProbe | null {
+    const probe = this.probes.shift();
+    return probe ? { ...probe, lostSeed: { ...probe.lostSeed } } : null;
+  }
+
+  pendingProbeCount(): number {
+    return this.probes.length;
   }
 
   prepareBeat(directorNote = ''): { speaker: Character; messages: ChatMessage[] } {

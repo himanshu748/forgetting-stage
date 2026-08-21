@@ -11,17 +11,26 @@ export const CAST: Character[] = [
   {
     name: 'Meera',
     emoji: 'M',
-    persona: 'the bride, brisk and certain of everything',
+    persona:
+      'the bride marrying Arun tonight, daughter of Leela and Rajiv, whose name ' +
+      'appears first on every invitation sent to both families and every seating plan',
+    style: 'brisk and certain of everything',
   },
   {
     name: 'Arun',
     emoji: 'A',
-    persona: 'the groom, romantic and permanently one step behind',
+    persona:
+      'the groom marrying Meera tonight, son of Devika and Mohan, who booked the ' +
+      'wedding hall beside the old cinema and paid every musician in advance',
+    style: 'romantic and permanently one step behind',
   },
   {
     name: 'Auntie',
     emoji: 'T',
-    persona: 'an aunt with loud opinions and a private version of every family story',
+    persona:
+      'Meera’s maternal aunt, keeper of the family jewellery, and the relative who ' +
+      'introduced Meera and Arun at a Diwali dinner and keeps their first photograph',
+    style: 'loudly opinionated, with a private version of every family story',
   },
 ];
 

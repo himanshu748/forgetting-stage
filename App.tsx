@@ -10,36 +10,57 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  StatusBar as NativeStatusBar,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
 
-import type { Beat } from './src/engine/types.ts';
+import {
+  createLayersClient,
+  type ReminderVariant,
+} from './src/analytics/layers.ts';
+import type { Beat, Drift as DriftReport } from './src/engine/types.ts';
+import { readPublicConfig, resolveGenerationEndpoint } from './src/config/public.ts';
 import { CAST, PREMISES, type PremiseOption } from './src/game/content.ts';
 import {
   createPerformanceProvider,
   createPerformanceSession,
+  performanceDrift,
+  performanceSnapshot,
   type PerformanceMode,
   type PerformanceSession,
 } from './src/game/performance.ts';
 import {
-  DEMO_ROUNDS,
-  canFinish,
-  pinBeat,
-  snapshotSession,
+  directorNoteDraftAfterAttempt,
   type GameSession,
+  type SessionSnapshot,
 } from './src/game/session.ts';
-import { createLiveGenerator } from './src/live/client.ts';
+import { createLivePerformanceClient } from './src/live/client.ts';
+import {
+  createOneSignalClient,
+  type ReminderPermission,
+} from './src/engagement/onesignal.ts';
 import {
   canStartPerformance,
-  consumePerformance,
-  grantEncore,
   ledgerFromState,
   normalizeDailyPass,
   type DailyPassState,
 } from './src/monetization/daily-pass.ts';
+import {
+  bootstrapMonetization,
+  reconcilePassWithMonetization,
+  unconfiguredMonetization,
+} from './src/monetization/bootstrap.ts';
+import { dailyPassAccess } from './src/monetization/access.ts';
+import {
+  consumeAndPersistPerformance,
+  consumeSessionEncore,
+  createPerformanceLaunchGate,
+  recordPurchasedEncore,
+  settlePerformanceConsumption,
+} from './src/monetization/launch.ts';
 import {
   createRevenueCatClient,
   isEncorePackage,
@@ -54,23 +75,41 @@ import {
 } from './src/monetization/showtime.ts';
 import { createLedgerStorage } from './src/monetization/storage.ts';
 
-const performanceProvider = createPerformanceProvider(createLiveGenerator());
+const publicConfig = readPublicConfig();
+const performanceProvider = createPerformanceProvider(createLivePerformanceClient({
+  platform: Platform.OS,
+  endpoint: resolveGenerationEndpoint(Platform.OS, publicConfig.generationEndpoint),
+}));
 const ledgerStorage = createLedgerStorage(() => import('@react-native-async-storage/async-storage'));
 const revenueCat = createRevenueCatClient({
   platform: Platform.OS,
+  publicKeys: publicConfig.revenueCat,
   loadPurchases: () => import('react-native-purchases'),
 });
-const emptyMonetization: MonetizationStatus = {
-  configured: false,
-  unlimited: false,
-  packages: [],
-};
+const oneSignal = createOneSignalClient({
+  platform: Platform.OS,
+  appId: publicConfig.oneSignalAppId,
+});
+const layers = createLayersClient({
+  platform: Platform.OS,
+  appId: publicConfig.layersAppId,
+  debug: __DEV__,
+});
+
+const DIRECTOR_CUES = [
+  'A storm breaks',
+  'An enemy returns',
+  'Someone confesses',
+  'Reveal the secret',
+] as const;
+
+const androidStatusBarHeight = Platform.OS === 'android' ? NativeStatusBar.currentHeight ?? 0 : 0;
 
 type ButtonProps = {
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  variant?: 'gold' | 'ghost' | 'danger';
+  variant?: 'gold' | 'ghost' | 'ticket' | 'danger';
   accessibilityLabel?: string;
 };
 
@@ -104,6 +143,7 @@ function ActionButton({
       style={({ pressed }) => [
         styles.actionButton,
         variant === 'ghost' && styles.actionGhost,
+        variant === 'ticket' && styles.actionTicket,
         variant === 'danger' && styles.actionDanger,
         disabled && styles.actionDisabled,
         pressed && !disabled && styles.actionPressed,
@@ -113,6 +153,7 @@ function ActionButton({
         style={[
           styles.actionLabel,
           variant === 'ghost' && styles.actionGhostLabel,
+          variant === 'ticket' && styles.actionTicketLabel,
           variant === 'danger' && styles.actionDangerLabel,
         ]}
       >
@@ -146,16 +187,25 @@ function Rule({ number, title, copy }: { number: string; title: string; copy: st
 function Lobby({
   onStart,
   pass,
+  ledgerAvailable,
+  sessionEncoreCredits,
+  launchBusy,
+  accessMessage,
   onShowPaywall,
 }: {
   onStart: (premise: PremiseOption) => void | Promise<void>;
   pass: DailyPassState | null;
+  ledgerAvailable: boolean | null;
+  sessionEncoreCredits: number;
+  launchBusy: boolean;
+  accessMessage: string | null;
   onShowPaywall: () => void;
 }) {
   const { width } = useWindowDimensions();
   const [selected, setSelected] = useState(PREMISES[0]?.id ?? 'wedding');
   const compact = width < 760;
   const choice = PREMISES.find((item) => item.id === selected) ?? PREMISES[0];
+  const access = dailyPassAccess(pass, ledgerAvailable, sessionEncoreCredits);
   if (!choice) return null;
 
   return (
@@ -167,7 +217,7 @@ function Lobby({
             <Text style={styles.eyebrow}>TONIGHT'S PERFORMANCE</Text>
             <Text style={styles.heroTitle}>One memory.{`\n`}Three certainties.{`\n`}No second chances.</Text>
             <Text style={styles.heroBody}>
-              An AI cast improvises inside a memory that holds only 1,000 tokens. Save one line. Watch everything else become negotiable.
+              An AI cast improvises inside a deliberately small shared memory. Save one line. Watch everything else become negotiable.
             </Text>
             <View style={styles.rulesBox}>
               <Rule number="01" title="Direct the play" copy="Choose the premise and intervene when the story needs a dangerous nudge." />
@@ -176,7 +226,7 @@ function Lobby({
             </View>
           </View>
 
-          <View style={styles.ticket}>
+          <View style={[styles.ticket, compact && styles.ticketCompact]}>
             <View style={styles.ticketTop}>
               <Text style={styles.ticketKicker}>SELECT A PREMISE</Text>
               <Text style={styles.ticketNumber}>NO. 001</Text>
@@ -217,10 +267,26 @@ function Lobby({
               </View>
             </View>
             <View style={styles.dailyPassPanel}>
-              <Text style={styles.dailyPassKicker}>{pass?.unlimited ? "DIRECTOR'S PASS ACTIVE" : 'DAILY CURTAIN'}</Text>
+              <Text style={styles.dailyPassKicker}>
+                {access === 'checking'
+                  ? 'CHECKING DAILY ACCESS'
+                  : pass?.unlimited
+                    ? "DIRECTOR'S PASS ACTIVE"
+                    : ledgerAvailable === false && sessionEncoreCredits > 0
+                      ? 'SESSION ENCORE READY'
+                      : ledgerAvailable === false
+                      ? 'LOCAL ACCESS UNAVAILABLE'
+                      : 'DAILY CURTAIN'}
+              </Text>
               <Text style={styles.dailyPassCopy}>
-                {pass?.unlimited
+                {access === 'checking'
+                  ? 'Checking today’s curtain before we admit the company.'
+                  : pass?.unlimited
                   ? 'Unlimited performances are unlocked.'
+                  : ledgerAvailable === false && sessionEncoreCredits > 0
+                    ? 'Your purchased encore is ready for this run. Local saving is still unavailable.'
+                  : ledgerAvailable === false
+                    ? 'We could not safely verify today’s local ticket. The box office can still restore unlimited access.'
                   : pass && pass.remaining < 1
                     ? pass.encores > 0
                       ? `Today’s free performance is spent. ${pass.encores} encore${pass.encores > 1 ? 's' : ''} waiting.`
@@ -229,15 +295,37 @@ function Lobby({
               </Text>
             </View>
             <ActionButton
-              label={!pass || canStartPerformance(pass)
-                ? pass && pass.remaining < 1 && !pass.unlimited ? 'Use an encore' : 'Raise the curtain'
-                : 'See tonight’s options'}
+              label={launchBusy
+                ? 'Preparing the stage...'
+                : access === 'checking'
+                ? 'Checking access...'
+                : access === 'start' && ledgerAvailable === false && sessionEncoreCredits > 0
+                  ? 'Use session encore'
+                : access === 'start' && pass && pass.remaining < 1 && !pass.unlimited
+                  ? 'Use an encore'
+                  : access === 'start'
+                    ? 'Raise the curtain'
+                    : 'See tonight’s options'}
+              disabled={access === 'checking' || launchBusy}
               onPress={() => {
-                if (!pass || canStartPerformance(pass)) void onStart(choice);
+                if (access === 'checking') return;
+                if (access === 'start') void onStart(choice);
                 else onShowPaywall();
               }}
             />
-            {!pass?.unlimited && <ActionButton label="View Director's Pass" variant="ghost" onPress={onShowPaywall} />}
+            {!pass?.unlimited && (
+              <ActionButton
+                label={access === 'checking' ? 'Checking box office...' : "View Director's Pass"}
+                variant="ticket"
+                disabled={access === 'checking' || launchBusy}
+                onPress={onShowPaywall}
+              />
+            )}
+            {accessMessage && (
+              <Text accessibilityLiveRegion="polite" style={styles.lobbyAccessMessage}>
+                {accessMessage}
+              </Text>
+            )}
             <Text style={styles.demoNote}>A RevenueCat entitlement unlocks unlimited performances. Offline preview remains available.</Text>
           </View>
         </View>
@@ -246,21 +334,36 @@ function Lobby({
   );
 }
 
-function MemoryMeter({ used, budget }: { used: number; budget: number }) {
+function MemoryMeter({
+  used,
+  budget,
+  exact,
+  forgottenCount,
+}: {
+  used: number;
+  budget: number;
+  exact: boolean;
+  forgottenCount: number;
+}) {
   const fraction = Math.min(1, used / budget);
+  const underPressure = fraction > 0.8;
   return (
     <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: budget, now: used }}>
       <View style={styles.meterLabels}>
         <Text style={styles.meterTitle}>SHARED MEMORY</Text>
-        <Text style={styles.meterValue}>{used} / {budget} TOKENS</Text>
+        <Text style={styles.meterValue}>{used} / {budget} {exact ? 'MODEL TOKENS' : 'EST. TOKENS'}</Text>
       </View>
-      <View style={styles.meterTrack}>
-        <View style={[styles.meterFill, { width: `${Math.max(3, fraction * 100)}%` }]} />
+      <View style={[styles.meterTrack, underPressure && styles.meterTrackHot]}>
+        <View style={[styles.meterFill, underPressure && styles.meterFillHot, { width: `${Math.max(3, fraction * 100)}%` }]} />
         <View style={styles.meterDangerLine} />
       </View>
       <View style={styles.meterLegend}>
-        <Text style={styles.meterHint}>Oldest unpinned beats fall first</Text>
-        <Text style={[styles.meterHint, fraction > 0.8 && styles.meterHintHot]}>{Math.round(fraction * 100)}% occupied</Text>
+        <Text style={[styles.meterHint, forgottenCount > 0 && styles.meterHintHot]}>
+          {forgottenCount > 0 ? `${forgottenCount} beats already lost` : 'Oldest unpinned beats fall first'}
+        </Text>
+        <Text style={[styles.meterHint, underPressure && styles.meterHintHot]}>
+          {underPressure ? 'EVICTION PRESSURE' : `${Math.round(fraction * 100)}% occupied`}
+        </Text>
       </View>
     </View>
   );
@@ -309,41 +412,47 @@ function BeatCard({
 
 function Stage({
   session,
+  snapshot,
   onAdvance,
   onDirection,
   onPin,
   onFinish,
   onExit,
   mode,
+  serverActive,
   busy,
   fallbackReason,
 }: {
   session: GameSession;
+  snapshot: SessionSnapshot;
   onAdvance: () => void;
-  onDirection: (note: string) => void;
+  onDirection: (note: string) => Promise<boolean>;
   onPin: (id: number) => void;
   onFinish: () => void;
   onExit: () => void;
   mode: PerformanceMode;
+  serverActive: boolean;
   busy: boolean;
   fallbackReason: string | null;
 }) {
   const { width } = useWindowDimensions();
   const [note, setNote] = useState('');
-  const snapshot = snapshotSession(session);
   const compact = width < 880;
   const feed = snapshot.memory.filter((beat) => beat.kind !== 'seed');
-  const canPin = snapshot.pinnedCount === 0;
-  const progress = Math.min(DEMO_ROUNDS, snapshot.round);
+  const canPin = snapshot.pinnedCount === 0 && !busy;
+  const forgettingDisplay = snapshot.forgettingDisplay;
+  const contradiction = forgettingDisplay?.contradiction;
+  const directionDisabled = snapshot.directorNoteUsed || busy || snapshot.actorResponsePending;
+  const progress = Math.min(snapshot.maxRounds, snapshot.round);
   const actionLabel = snapshot.canAdvance
     ? `${snapshot.nextSpeaker?.name ?? 'Actor'} steps forward`
     : 'Ready for curtain';
 
-  const submitDirection = () => {
+  const submitDirection = async () => {
     const value = note.trim();
-    if (!value || snapshot.directorNoteUsed) return;
-    onDirection(value);
-    setNote('');
+    if (!value || directionDisabled) return;
+    const accepted = await onDirection(value);
+    setNote((draft) => directorNoteDraftAfterAttempt(draft, accepted));
   };
 
   return (
@@ -363,14 +472,18 @@ function Stage({
               <View style={styles.liveStatusRow}>
                 <Text style={styles.stageKicker}>LIVE PERFORMANCE</Text>
                 <View style={[styles.modeBadge, mode === 'offline' && styles.modeBadgeOffline]}>
-                  <Text style={styles.modeBadgeText}>{mode === 'live' ? 'AI LIVE' : 'OFFLINE FALLBACK'}</Text>
+                  <Text style={styles.modeBadgeText}>
+                    {serverActive
+                      ? mode === 'live' ? 'AI LIVE · EXACT 1K' : 'SERVER SAFE LINE'
+                      : 'OFFLINE PREVIEW'}
+                  </Text>
                 </View>
               </View>
               <Text style={styles.stageTitle}>{session.premise}</Text>
             </View>
             <View style={styles.roundPill}>
               <Text style={styles.roundPillTop}>ROUND</Text>
-              <Text style={styles.roundPillValue}>{progress} / {DEMO_ROUNDS}</Text>
+              <Text style={styles.roundPillValue}>{progress} / {snapshot.maxRounds}</Text>
             </View>
           </View>
 
@@ -388,12 +501,75 @@ function Stage({
                 {feed.map((beat) => (
                   <BeatCard key={beat.id} beat={beat} canPin={canPin} onPin={onPin} />
                 ))}
-                {snapshot.lastForgotten.length > 0 && (
+                {forgettingDisplay && (
                   <View style={styles.evictionNotice} accessible accessibilityLiveRegion="polite">
-                    <Text style={styles.evictionKicker}>MEMORY EVICTED</Text>
-                    {snapshot.lastForgotten.map((beat) => (
-                      <Text key={beat.id} style={styles.evictionText} numberOfLines={2}>
-                        {beat.kind === 'seed' ? 'Identity lost' : beat.speaker}: {beat.text}
+                    <Text style={styles.evictionKicker}>MEMORY THAT CAUSED THIS CHAIN</Text>
+                    <Text style={styles.evictionText} numberOfLines={2}>
+                      {forgettingDisplay.forgotten.speaker === 'The play'
+                        ? 'Premise forgotten'
+                        : 'Character fact forgotten'}: {forgettingDisplay.forgotten.text}
+                    </Text>
+                  </View>
+                )}
+                {contradiction && (
+                  <View
+                    style={styles.contradictionCard}
+                    accessible
+                    accessibilityRole="summary"
+                    accessibilityLiveRegion="polite"
+                    accessibilityLabel={[
+                      `Memory erased: ${contradiction.lostSeed.speaker}, ${contradiction.lostSeed.text}.`,
+                      contradiction.responses[0]
+                        ? `Replacement one from ${contradiction.responses[0].speaker}: ${contradiction.responses[0].text}.`
+                        : 'Waiting for the first actor.',
+                      contradiction.responses[1]
+                        ? `Replacement two from ${contradiction.responses[1].speaker}: ${contradiction.responses[1].text}.`
+                        : 'Waiting for the next actor.',
+                    ].join(' ')}
+                  >
+                    <View style={styles.contradictionHeader}>
+                      <Text style={styles.contradictionKicker}>FORGETTING CHAIN</Text>
+                      <Text style={styles.contradictionStatus}>
+                        {contradiction.complete ? 'TWO REPLACEMENTS RECORDED' : 'WAITING FOR THE NEXT ACTOR'}
+                      </Text>
+                    </View>
+                    <View style={styles.contradictionStep}>
+                      <Text style={styles.contradictionNumber}>1</Text>
+                      <View style={styles.contradictionCopy}>
+                        <Text style={styles.contradictionLabel}>
+                          {contradiction.lostSeed.speaker === 'The play'
+                            ? 'PREMISE ERASED'
+                            : `${contradiction.lostSeed.speaker.toUpperCase()} FACT ERASED`}
+                        </Text>
+                        <Text style={styles.contradictionText}>{contradiction.lostSeed.text}</Text>
+                      </View>
+                    </View>
+                    {[0, 1].map((index) => {
+                      const response = contradiction.responses[index];
+                      return (
+                        <View key={index} style={styles.contradictionStep}>
+                          <Text style={styles.contradictionNumber}>{index + 2}</Text>
+                          <View style={styles.contradictionCopy}>
+                            <Text style={styles.contradictionLabel}>
+                              {response ? `${response.emoji} ${response.speaker} REPLACED IT` : 'REPLACEMENT PENDING'}
+                            </Text>
+                            <Text style={[styles.contradictionText, !response && styles.contradictionWaiting]}>
+                              {response?.text ?? 'waiting for the next actor'}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+                {forgettingDisplay && forgettingDisplay.cascading.length > 0 && (
+                  <View style={styles.queuedEvictions} accessible accessibilityLiveRegion="polite">
+                    <Text style={styles.queuedEvictionsKicker}>NEW MEMORY LOSSES THIS TURN</Text>
+                    {forgettingDisplay.cascading.map((beat) => (
+                      <Text key={beat.id} style={styles.queuedEvictionsText} numberOfLines={2}>
+                        {beat.kind === 'seed'
+                          ? beat.speaker === 'The play' ? 'Premise forgotten' : 'Character fact forgotten'
+                          : beat.speaker}: {beat.text}
                       </Text>
                     ))}
                   </View>
@@ -402,7 +578,12 @@ function Stage({
             </View>
 
             <View style={styles.controlPanel}>
-              <MemoryMeter used={snapshot.memoryTokens} budget={snapshot.budget} />
+              <MemoryMeter
+                used={snapshot.memoryTokens}
+                budget={snapshot.budget}
+                exact={serverActive}
+                forgottenCount={snapshot.forgotten.length}
+              />
 
               <View style={styles.truthPanel}>
                 <Text style={styles.controlKicker}>THE ONE THING THEY KEEP</Text>
@@ -417,7 +598,11 @@ function Stage({
               </View>
 
               <View style={styles.nextPanel}>
-                <Text style={styles.controlKicker}>{snapshot.canAdvance ? 'NEXT UNDER THE LIGHT' : 'THE CAST IS WAITING'}</Text>
+                <Text style={styles.controlKicker}>
+                  {snapshot.canAdvance
+                    ? 'NEXT UNDER THE LIGHT'
+                    : snapshot.canFinish ? 'THE CAST IS WAITING' : 'THE MEMORY TEST FAILED'}
+                </Text>
                 <View style={styles.nextActor}>
                   <Text style={styles.nextMonogram}>{snapshot.nextSpeaker?.emoji ?? 'C'}</Text>
                   <View>
@@ -433,29 +618,59 @@ function Stage({
                   accessibilityLabel="Director's note"
                   value={note}
                   onChangeText={setNote}
-                  placeholder={snapshot.directorNoteUsed ? 'Your one intervention is already in the script.' : 'Make them explain the second bride...'}
+                  placeholder={snapshot.directorNoteUsed
+                    ? 'Your one intervention is already in the script.'
+                    : directionDisabled
+                      ? 'Wait for the actor to finish this line.'
+                      : 'Make them explain the second bride...'}
                   placeholderTextColor="#706658"
                   multiline
-                  editable={!snapshot.directorNoteUsed}
+                  editable={!directionDisabled}
                   maxLength={120}
-                  style={[styles.directionInput, snapshot.directorNoteUsed && styles.directionInputDisabled]}
+                  style={[styles.directionInput, directionDisabled && styles.directionInputDisabled]}
                 />
+                {!snapshot.directorNoteUsed && (
+                  <View style={styles.directionCues}>
+                    {DIRECTOR_CUES.map((cue) => (
+                      <Pressable
+                        key={cue}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Use director cue: ${cue}`}
+                        disabled={directionDisabled}
+                        onPress={() => setNote(cue)}
+                        style={({ pressed }) => [
+                          styles.directionCue,
+                          directionDisabled && styles.directionCueDisabled,
+                          pressed && !directionDisabled && styles.directionCuePressed,
+                        ]}
+                      >
+                        <Text style={styles.directionCueText}>{cue}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
                 <View style={styles.directionFooter}>
-                  <Text style={styles.noteCounter}>{snapshot.directorNoteUsed ? 'intervention spent' : `${note.length}/120 · costs memory`}</Text>
-                  <ActionButton label={snapshot.directorNoteUsed ? 'Note sent' : 'Send note'} variant="ghost" disabled={snapshot.directorNoteUsed || !note.trim()} onPress={submitDirection} />
+                  <Text style={styles.noteCounter}>{snapshot.directorNoteUsed ? 'intervention spent' : directionDisabled ? 'actor response pending' : `${note.length}/120 · costs memory`}</Text>
+                  <ActionButton label={snapshot.directorNoteUsed ? 'Note sent' : 'Send note'} variant="ghost" disabled={directionDisabled || !note.trim()} onPress={() => { void submitDirection(); }} />
                 </View>
               </View>
 
               <View style={styles.stageActions}>
                 {snapshot.canAdvance ? (
                   <ActionButton label={busy ? 'Generating performance...' : actionLabel} disabled={busy} onPress={onAdvance} />
-                ) : (
+                ) : snapshot.canFinish ? (
                   <ActionButton label={busy ? 'Writing the curtain...' : 'Bring down the curtain'} disabled={busy} variant="danger" onPress={onFinish} />
+                ) : (
+                  <ActionButton label="Return to the lobby" disabled={busy} variant="ghost" onPress={onExit} />
                 )}
-                <Text style={[styles.stageFootnote, fallbackReason && styles.fallbackFootnote]}>
-                  {fallbackReason
-                    ? 'Live AI was unavailable, so this turn used the offline performance.'
-                    : canFinish(session)
+                <Text style={[styles.stageFootnote, (fallbackReason || snapshot.failureReason) && styles.fallbackFootnote]}>
+                  {snapshot.failureReason
+                    ? snapshot.failureReason
+                    : fallbackReason
+                    ? serverActive
+                      ? 'This turn broke a model rule, so the server committed a safe deterministic line.'
+                      : 'Live AI was unavailable, so this turn continued in the offline preview.'
+                    : snapshot.canFinish
                       ? 'The damage is done. End when ready.'
                       : 'Every line consumes the shared script.'}
                 </Text>
@@ -544,17 +759,26 @@ function HouseAd() {
 }
 
 function Drift({
-  session,
+  drift,
+  memoryTokens,
   houseAd,
+  reminderStatus,
+  reminderVariant,
+  reminderBusy,
+  onEnableReminder,
   onReplay,
   onNewPlay,
 }: {
-  session: GameSession;
+  drift: DriftReport;
+  memoryTokens: number;
   houseAd: boolean;
+  reminderStatus: ReminderPermission;
+  reminderVariant: ReminderVariant;
+  reminderBusy: boolean;
+  onEnableReminder: () => void;
   onReplay: () => void;
   onNewPlay: () => void;
 }) {
-  const drift = session.engine.drift();
   const pinned = drift.survived[0];
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -569,7 +793,7 @@ function Drift({
 
         <View style={styles.driftStats}>
           <View style={styles.stat}><Text style={styles.statValue}>{drift.forgottenCount}</Text><Text style={styles.statLabel}>BEATS FORGOTTEN</Text></View>
-          <View style={styles.stat}><Text style={styles.statValue}>{session.engine.memoryTokens()}</Text><Text style={styles.statLabel}>TOKENS AT CURTAIN</Text></View>
+          <View style={styles.stat}><Text style={styles.statValue}>{memoryTokens}</Text><Text style={styles.statLabel}>TOKENS AT CURTAIN</Text></View>
           <View style={styles.stat}><Text style={styles.statValue}>{pinned ? '1' : '0'}</Text><Text style={styles.statLabel}>TRUTH SURVIVED</Text></View>
         </View>
 
@@ -605,6 +829,35 @@ function Drift({
           ))}
         </View>
 
+        {reminderStatus !== 'unavailable' && (
+          <View style={styles.reminderPanel}>
+            <Text style={styles.reminderKicker}>TOMORROW'S CURTAIN</Text>
+            <Text style={styles.reminderCopy}>
+              {reminderStatus === 'enabled'
+                ? 'You will get one cue when the next free performance is ready.'
+                : reminderStatus === 'denied'
+                  ? 'Notifications are off. You can allow them from system settings.'
+                  : reminderStatus === 'error'
+                    ? 'The reminder could not be set. Your daily ticket still refreshes normally.'
+                    : reminderVariant === 'curiosity'
+                      ? 'Cue one notification tomorrow, when a new cast is ready to destroy a different truth.'
+                      : 'Ask for one notification when tomorrow’s free performance opens.'}
+            </Text>
+            <ActionButton
+              label={reminderBusy
+                ? 'Asking the stage manager...'
+                : reminderStatus === 'enabled'
+                  ? 'Reminder enabled'
+                  : reminderVariant === 'curiosity'
+                    ? 'Cue tomorrow’s disaster'
+                    : 'Remind me tomorrow'}
+              variant="ghost"
+              disabled={reminderBusy || reminderStatus === 'enabled'}
+              onPress={onEnableReminder}
+            />
+          </View>
+        )}
+
         {houseAd && <HouseAd />}
 
         <View style={styles.driftActions}>
@@ -621,13 +874,22 @@ export default function App() {
   const [performance, setPerformance] = useState<PerformanceSession | null>(null);
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<DailyPassState | null>(null);
-  const [monetization, setMonetization] = useState(emptyMonetization);
+  const [ledgerAvailable, setLedgerAvailable] = useState<boolean | null>(null);
+  const [sessionEncoreCredits, setSessionEncoreCredits] = useState(0);
+  const [launchBusy, setLaunchBusy] = useState(false);
+  const [accessMessage, setAccessMessage] = useState<string | null>(null);
+  const [monetization, setMonetization] = useState(unconfiguredMonetization);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallBusy, setPaywallBusy] = useState(false);
   const [paywallError, setPaywallError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const [reminderStatus, setReminderStatus] = useState<ReminderPermission>('unavailable');
+  const [reminderVariant, setReminderVariant] = useState<ReminderVariant>('free_show');
+  const [reminderBusy, setReminderBusy] = useState(false);
   const session = performance?.session ?? null;
+  const currentSnapshot = performance ? performanceSnapshot(performance) : null;
   const fade = useRef(new Animated.Value(1)).current;
+  const launchGate = useRef(createPerformanceLaunchGate()).current;
   const premise = useMemo(
     () => PREMISES.find((item) => item.id === session?.premiseId) ?? PREMISES[0],
     [session?.premiseId],
@@ -635,16 +897,33 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([ledgerStorage.load(), revenueCat.status()])
-      .then(([ledger, status]) => {
-        if (!active) return;
-        setMonetization(status);
-        setPass(normalizeDailyPass(ledger, new Date(), status.unlimited));
-      })
-      .catch(() => {
-        if (active) setPass(normalizeDailyPass(null, new Date(), false));
-      });
+    const startup = bootstrapMonetization({
+      loadLedger: () => ledgerStorage.load(),
+      refreshRevenueCat: () => revenueCat.status(),
+    });
+    void Promise.all([startup.pass, startup.ledgerAvailable]).then(([loadedPass, available]) => {
+      if (!active) return;
+      setLedgerAvailable(available);
+      setPass(loadedPass);
+    });
+    void startup.monetization.then((status) => {
+      if (!active) return;
+      setMonetization(status);
+      setPass((current) => reconcilePassWithMonetization(current, status));
+    });
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void oneSignal.initialize().then((configured) => {
+      if (active) setReminderStatus(configured ? 'ready' : 'unavailable');
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    void layers.initialize().then(() => layers.reminderVariant()).then(setReminderVariant);
   }, []);
 
   // The one rule the whole day was about: an offer may never interrupt a
@@ -652,6 +931,7 @@ export default function App() {
   const showPaywall = () => {
     if (!canOfferPurchase(momentForScreen(screen))) return;
     setPaywallVisible(true);
+    void layers.track('paywall_opened', { screen });
   };
 
   const transition = (next: Screen) => {
@@ -659,7 +939,7 @@ export default function App() {
       toValue: 0,
       duration: 120,
       easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start(({ finished }) => {
       if (!finished) return;
       setScreen(next);
@@ -667,74 +947,189 @@ export default function App() {
         toValue: 1,
         duration: 260,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     });
   };
 
   const start = async (choice: PremiseOption) => {
-    const currentPass = normalizeDailyPass(
-      pass ? ledgerFromState(pass) : null,
-      new Date(),
-      monetization.unlimited,
-    );
-    if (!canStartPerformance(currentPass)) {
-      setPass(currentPass);
-      showPaywall();
-      return;
-    }
-    const consumed = consumePerformance(currentPass);
-    setPass(consumed);
-    await ledgerStorage.save(ledgerFromState(consumed));
+    try {
+      await launchGate.run(async () => {
+        setLaunchBusy(true);
+        setAccessMessage(null);
+        // A null pass or an unavailable ledger is unknown access, never a
+        // fresh daily grant. A confirmed entitlement may bypass local storage.
+        if (!pass) return;
+        const currentPass = normalizeDailyPass(
+          ledgerFromState(pass),
+          new Date(),
+          monetization.unlimited,
+        );
+        if (!canStartPerformance(currentPass)) {
+          setPass(currentPass);
+          showPaywall();
+          return;
+        }
 
-    const next = createPerformanceSession(choice.id, choice.premise);
-    setPerformance(next);
-    setBusy(true);
-    transition('stage');
-    await performanceProvider.open(next);
-    setBusy(false);
-    setRevision((value) => value + 1);
+        let admittedPass: DailyPassState;
+        if (ledgerAvailable !== true && !currentPass.unlimited) {
+          if (sessionEncoreCredits < 1 || currentPass.encores < 1) {
+            setPass(currentPass);
+            showPaywall();
+            return;
+          }
+          admittedPass = consumeSessionEncore(currentPass);
+          setSessionEncoreCredits((value) => Math.max(0, value - 1));
+        } else {
+          const consumption = await consumeAndPersistPerformance({
+            pass: currentPass,
+            saveLedger: (nextLedger) => ledgerStorage.save(nextLedger),
+          });
+          const settled = settlePerformanceConsumption(
+            consumption,
+            ledgerAvailable === true,
+          );
+          if (!settled.admitted) {
+            setLedgerAvailable(settled.ledgerAvailable);
+            setAccessMessage('The curtain stayed up because today’s ticket could not be saved. No performance was spent.');
+            return;
+          }
+          admittedPass = settled.pass;
+        }
+        setPass(admittedPass);
+
+        const next = createPerformanceSession(choice.id, choice.premise);
+        setPerformance(next);
+        setBusy(true);
+        transition('stage');
+        await performanceProvider.open(next);
+        void layers.track('performance_started', {
+          premise_id: choice.id,
+          mode: next.serverActive && next.mode === 'live' ? 'live_ai' : 'offline_preview',
+        });
+        setBusy(false);
+        setRevision((value) => value + 1);
+      });
+    } finally {
+      setLaunchBusy(launchGate.isActive());
+    }
   };
 
   const advance = async () => {
     if (!performance || busy) return;
+    const forgottenBefore = new Set(performanceSnapshot(performance).forgotten.map((beat) => beat.id));
     setBusy(true);
     await performanceProvider.advance(performance);
+    const advanced = performanceSnapshot(performance);
+    advanced.forgotten
+      .filter((beat) => beat.kind === 'seed' && !forgottenBefore.has(beat.id))
+      .forEach((beat) => {
+        void layers.track('memory_seed_forgotten', {
+          premise_id: performance.session.premiseId,
+          seed_speaker: beat.speaker,
+        });
+      });
     setBusy(false);
     setRevision((value) => value + 1);
+  };
+
+  const pin = async (beatId: number) => {
+    if (!performance || busy) return;
+    setBusy(true);
+    await performanceProvider.pin(performance, beatId);
+    setBusy(false);
+    setRevision((value) => value + 1);
+  };
+
+  const direction = async (note: string): Promise<boolean> => {
+    if (!performance || busy) return false;
+    const forgottenBefore = new Set(performanceSnapshot(performance).forgotten.map((beat) => beat.id));
+    setBusy(true);
+    const accepted = await performanceProvider.direction(performance, note) !== null;
+    setBusy(false);
+    if (accepted) {
+      performanceSnapshot(performance).forgotten
+        .filter((beat) => beat.kind === 'seed' && !forgottenBefore.has(beat.id))
+        .forEach((beat) => {
+          void layers.track('memory_seed_forgotten', {
+            premise_id: performance.session.premiseId,
+            seed_speaker: beat.speaker,
+          });
+        });
+      setRevision((value) => value + 1);
+    }
+    return accepted;
   };
 
   const finish = async () => {
     if (!performance || busy) return;
     setBusy(true);
     await performanceProvider.finish(performance);
+    const completed = performanceSnapshot(performance);
+    void oneSignal.trackPerformanceCompleted({
+      premiseId: performance.session.premiseId,
+      forgottenCount: completed.forgotten.length,
+    });
+    void layers.track('performance_completed', {
+      premise_id: performance.session.premiseId,
+      mode: performance.serverActive && performance.mode === 'live' ? 'live_ai' : 'offline_preview',
+      forgotten_count: completed.forgotten.length,
+      contradiction_count: completed.contradictions.filter((item) => item.complete).length,
+      pinned_count: completed.pinnedCount,
+    });
     setBusy(false);
     setRevision((value) => value + 1);
     transition('drift');
   };
 
+  const enableReminder = async () => {
+    if (!performance || reminderBusy) return;
+    setReminderBusy(true);
+    const status = await oneSignal.enableDailyReminder(performance.session.premiseId);
+    setReminderStatus(status);
+    if (status === 'enabled') {
+      void layers.track('daily_reminder_enabled', {
+        premise_id: performance.session.premiseId,
+        copy_variant: reminderVariant,
+      });
+    }
+    setReminderBusy(false);
+  };
+
   const updateMonetization = (status: MonetizationStatus) => {
     setMonetization(status);
-    setPass((current) => normalizeDailyPass(
-      current ? ledgerFromState(current) : null,
-      new Date(),
-      status.unlimited,
-    ));
+    setPass((current) => reconcilePassWithMonetization(current, status));
     if (status.unlimited) setPaywallVisible(false);
   };
 
   const purchase = async (pkg: DirectorPackage) => {
     setPaywallBusy(true);
     setPaywallError(null);
+    setAccessMessage(null);
     try {
       const status = await revenueCat.purchase(pkg);
       updateMonetization(status);
+      void layers.track('purchase_completed', {
+        package_id: pkg.identifier,
+        unlimited: status.unlimited,
+      });
       // A consumable flips no entitlement, so the extra show is recorded here.
-      if (isEncorePackage(pkg) && !status.unlimited) {
-        const current = normalizeDailyPass(pass ? ledgerFromState(pass) : null, new Date(), status.unlimited);
-        const bought = grantEncore(current);
-        setPass(bought);
-        await ledgerStorage.save(ledgerFromState(bought));
+      if (isEncorePackage(pkg) && !status.unlimited && pass) {
+        const current = normalizeDailyPass(ledgerFromState(pass), new Date(), false);
+        const recorded = await recordPurchasedEncore({
+          pass: current,
+          saveLedger: (nextLedger) => ledgerStorage.save(nextLedger),
+        });
+        setPass(recorded.pass);
+        if (recorded.persisted) {
+          setLedgerAvailable(true);
+          setSessionEncoreCredits(0);
+        } else {
+          // The purchase itself proves this encore even when storage does not.
+          setLedgerAvailable(false);
+          setSessionEncoreCredits((value) => value + 1);
+          setAccessMessage('Encore purchased. It is ready now, but may not survive an app restart because local saving failed.');
+        }
       }
       setPaywallVisible(false);
     } catch (error) {
@@ -748,18 +1143,20 @@ export default function App() {
     setPaywallBusy(true);
     setPaywallError(null);
     try {
-      updateMonetization(await revenueCat.restore());
+      const status = await revenueCat.restore();
+      updateMonetization(status);
+      void layers.track('purchase_restored', { unlimited: status.unlimited });
+      if (status.unlimited) {
+        setPaywallVisible(false);
+        setAccessMessage("Director's Pass restored. Unlimited performances are active.");
+      } else {
+        setPaywallError("No active Director's Pass was found to restore.");
+      }
     } catch (error) {
       setPaywallError(error instanceof Error ? error.message : 'Restore failed');
     } finally {
       setPaywallBusy(false);
     }
-  };
-
-  const mutate = (operation: (value: PerformanceSession) => void) => {
-    if (!performance) return;
-    operation(performance);
-    setRevision((value) => value + 1);
   };
 
   const replay = () => {
@@ -774,27 +1171,38 @@ export default function App() {
         {screen === 'lobby' && (
           <Lobby
             pass={pass}
+            ledgerAvailable={ledgerAvailable}
+            sessionEncoreCredits={sessionEncoreCredits}
+            launchBusy={launchBusy}
+            accessMessage={accessMessage}
             onShowPaywall={showPaywall}
             onStart={(choice) => { void start(choice); }}
           />
         )}
-        {screen === 'stage' && session && performance && (
+        {screen === 'stage' && session && performance && currentSnapshot && (
           <Stage
             session={session}
+            snapshot={currentSnapshot}
             mode={performance.mode}
+            serverActive={performance.serverActive}
             busy={busy}
             fallbackReason={performance.lastFallbackReason}
             onAdvance={() => { void advance(); }}
-            onDirection={(note) => mutate((value) => { performanceProvider.direction(value, note); })}
-            onPin={(id) => mutate((value) => { pinBeat(value.session, id); })}
+            onDirection={direction}
+            onPin={(id) => { void pin(id); }}
             onFinish={() => { void finish(); }}
             onExit={() => transition('lobby')}
           />
         )}
-        {screen === 'drift' && session && (
+        {screen === 'drift' && performance && currentSnapshot && (
           <Drift
-            session={session}
+            drift={performanceDrift(performance)}
+            memoryTokens={currentSnapshot.memoryTokens}
             houseAd={shouldShowHouseAd(momentForScreen(screen), monetization.unlimited)}
+            reminderStatus={reminderStatus}
+            reminderVariant={reminderVariant}
+            reminderBusy={reminderBusy}
+            onEnableReminder={() => { void enableReminder(); }}
             onReplay={replay}
             onNewPlay={() => transition('lobby')}
           />
@@ -816,7 +1224,7 @@ export default function App() {
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: colors.ink },
   flex: { flex: 1 },
-  safeArea: { flex: 1, backgroundColor: colors.ink },
+  safeArea: { flex: 1, backgroundColor: colors.ink, paddingTop: androidStatusBarHeight },
   lobbyScroll: { flexGrow: 1, paddingHorizontal: '5%', paddingTop: 22, paddingBottom: 44 },
   wordmark: { borderBottomWidth: 1, borderBottomColor: colors.line, paddingBottom: 18, marginBottom: 42 },
   wordmarkKicker: { color: colors.gold, fontSize: 10, letterSpacing: 2.5, fontWeight: '800' },
@@ -834,6 +1242,7 @@ const styles = StyleSheet.create({
   ruleTitle: { color: colors.paper, fontSize: 15, fontWeight: '800', marginBottom: 4 },
   ruleBody: { color: colors.smoke, fontSize: 13, lineHeight: 19 },
   ticket: { flex: 0.8, backgroundColor: colors.paper, padding: 26, borderRadius: 3, minWidth: 320, maxWidth: 480, alignSelf: 'center', width: '100%', shadowColor: '#000', shadowOpacity: 0.38, shadowRadius: 28, shadowOffset: { width: 0, height: 18 }, elevation: 12 },
+  ticketCompact: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
   ticketTop: { flexDirection: 'row', justifyContent: 'space-between', paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: '#c8bca8' },
   ticketKicker: { color: '#5c5245', fontSize: 10, letterSpacing: 1.9, fontWeight: '900' },
   ticketNumber: { color: '#817564', fontSize: 10, fontFamily: Platform.select({ ios: 'Courier', android: 'monospace', default: 'monospace' }) },
@@ -855,13 +1264,16 @@ const styles = StyleSheet.create({
   castName: { color: '#3d352b', fontSize: 12, fontWeight: '800' },
   actionButton: { minHeight: 48, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.gold, borderWidth: 1, borderColor: colors.gold },
   actionGhost: { backgroundColor: 'transparent', borderColor: colors.line },
+  actionTicket: { backgroundColor: 'transparent', borderColor: '#8a7d69' },
   actionDanger: { backgroundColor: colors.ember, borderColor: colors.ember },
   actionDisabled: { opacity: 0.35 },
   actionPressed: { transform: [{ translateY: 1 }], opacity: 0.9 },
   actionLabel: { color: colors.ink, fontSize: 12, letterSpacing: 1.3, fontWeight: '900', textTransform: 'uppercase' },
   actionGhostLabel: { color: colors.paper },
+  actionTicketLabel: { color: '#2b241c' },
   actionDangerLabel: { color: '#fff8ef' },
   demoNote: { color: '#786c5a', fontSize: 10, textAlign: 'center', marginTop: 12 },
+  lobbyAccessMessage: { color: '#8a2f20', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 10 },
   dailyPassPanel: { borderWidth: 1, borderColor: '#c8bca8', padding: 12, marginBottom: 12, backgroundColor: '#eee2ce' },
   dailyPassKicker: { color: '#7b5515', fontSize: 9, letterSpacing: 1.5, fontWeight: '900' },
   dailyPassCopy: { color: '#4f4538', fontSize: 11, lineHeight: 17, marginTop: 5 },
@@ -877,6 +1289,9 @@ const styles = StyleSheet.create({
   houseAd: { borderWidth: 1, borderColor: colors.line, padding: 16, marginBottom: 22, backgroundColor: colors.panelSoft },
   houseAdKicker: { color: colors.smoke, fontSize: 9, letterSpacing: 1.8, fontWeight: '900' },
   houseAdCopy: { color: colors.smoke, fontSize: 12, lineHeight: 19, marginTop: 6 },
+  reminderPanel: { borderWidth: 1, borderColor: colors.goldSoft, padding: 18, marginBottom: 22, backgroundColor: '#17130c', gap: 10 },
+  reminderKicker: { color: colors.gold, fontSize: 9, letterSpacing: 1.8, fontWeight: '900' },
+  reminderCopy: { color: colors.smoke, fontSize: 12, lineHeight: 19 },
   stageShell: { flexGrow: 1, paddingHorizontal: '3.5%', paddingTop: 16, paddingBottom: 18, minHeight: '100%' },
   stageHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 18, borderBottomWidth: 1, borderBottomColor: colors.line, paddingBottom: 14 },
   backLabel: { color: colors.smoke, fontSize: 10, letterSpacing: 1.7, fontWeight: '800' },
@@ -917,12 +1332,27 @@ const styles = StyleSheet.create({
   evictionNotice: { borderWidth: 1, borderColor: '#683226', backgroundColor: '#21110e', padding: 14, marginTop: 4 },
   evictionKicker: { color: colors.ember, fontSize: 9, letterSpacing: 1.7, fontWeight: '900', marginBottom: 7 },
   evictionText: { color: '#c99b8e', fontSize: 12, lineHeight: 18, textDecorationLine: 'line-through' },
+  contradictionCard: { borderWidth: 2, borderColor: colors.gold, backgroundColor: '#17130c', padding: 14, marginTop: 4 },
+  contradictionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: colors.goldSoft, paddingBottom: 10, marginBottom: 4 },
+  contradictionKicker: { color: colors.gold, fontSize: 10, letterSpacing: 1.8, fontWeight: '900' },
+  contradictionStatus: { color: colors.paper, fontSize: 8, lineHeight: 12, letterSpacing: 1, fontWeight: '900', textAlign: 'right', flex: 1 },
+  contradictionStep: { flexDirection: 'row', gap: 11, borderBottomWidth: 1, borderBottomColor: colors.line, paddingVertical: 10 },
+  contradictionNumber: { width: 22, height: 22, borderRadius: 11, overflow: 'hidden', textAlign: 'center', lineHeight: 22, backgroundColor: colors.ember, color: '#fff8ef', fontSize: 10, fontWeight: '900' },
+  contradictionCopy: { flex: 1 },
+  contradictionLabel: { color: colors.gold, fontSize: 8, letterSpacing: 1.2, fontWeight: '900', marginBottom: 4 },
+  contradictionText: { color: colors.paper, fontSize: 13, lineHeight: 19, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
+  contradictionWaiting: { color: colors.smoke, fontStyle: 'italic' },
+  queuedEvictions: { borderWidth: 1, borderColor: '#683226', backgroundColor: '#160e0c', padding: 12, marginTop: 4 },
+  queuedEvictionsKicker: { color: colors.ember, fontSize: 8, letterSpacing: 1.3, fontWeight: '900', marginBottom: 6 },
+  queuedEvictionsText: { color: '#c99b8e', fontSize: 11, lineHeight: 17, textDecorationLine: 'line-through' },
   controlPanel: { width: 360, maxWidth: '100%', alignSelf: 'stretch', backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, padding: 17, gap: 16 },
   meterLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 },
   meterTitle: { color: colors.paper, fontSize: 9, letterSpacing: 1.7, fontWeight: '900' },
   meterValue: { color: colors.gold, fontSize: 10, fontFamily: Platform.select({ ios: 'Courier', android: 'monospace', default: 'monospace' }) },
   meterTrack: { height: 11, backgroundColor: '#29231d', overflow: 'hidden', position: 'relative' },
+  meterTrackHot: { backgroundColor: '#311b15' },
   meterFill: { height: '100%', backgroundColor: colors.gold },
+  meterFillHot: { backgroundColor: colors.ember },
   meterDangerLine: { position: 'absolute', height: '100%', width: 1, backgroundColor: colors.ember, left: '82%' },
   meterLegend: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 7 },
   meterHint: { color: '#746a5d', fontSize: 9 },
@@ -940,6 +1370,11 @@ const styles = StyleSheet.create({
   directionPanel: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 15 },
   directionInput: { minHeight: 76, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.ink, color: colors.paper, padding: 11, textAlignVertical: 'top', fontSize: 13, lineHeight: 18 },
   directionInputDisabled: { opacity: 0.48 },
+  directionCues: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  directionCue: { borderWidth: 1, borderColor: colors.line, backgroundColor: '#191510', paddingVertical: 7, paddingHorizontal: 9 },
+  directionCueDisabled: { opacity: 0.35 },
+  directionCuePressed: { borderColor: colors.gold, backgroundColor: '#241d12' },
+  directionCueText: { color: colors.smoke, fontSize: 9, letterSpacing: 0.25 },
   directionFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 8 },
   noteCounter: { color: '#766b5e', fontSize: 9 },
   stageActions: { marginTop: 'auto', gap: 9 },

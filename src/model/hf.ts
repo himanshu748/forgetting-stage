@@ -5,7 +5,7 @@ const ENDPOINT = 'https://router.huggingface.co/v1/chat/completions';
 // Provider routing shifts under you. Qwen/Qwen2.5-7B-Instruct served fine in the
 // morning and was dropped by the afternoon with a 400. Never assume a model id
 // stays available; check https://router.huggingface.co/v1/models when this breaks.
-export const MODEL = process.env.MODEL ?? 'meta-llama/Llama-3.1-8B-Instruct';
+export const MODEL = process.env.MODEL ?? 'Qwen/Qwen3-4B-Instruct-2507';
 
 export function requireToken(): string {
   const token = process.env.HF_TOKEN;

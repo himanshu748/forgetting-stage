@@ -2,6 +2,7 @@
   "expo": {
     "name": "The Forgetting Stage",
     "slug": "the-forgetting-stage",
+    "scheme": "exp+the-forgetting-stage",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -9,7 +10,18 @@
     "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.himanshujha.forgettingstage"
+      "bundleIdentifier": "com.himanshujha.forgettingstage",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
+      },
+      "entitlements": {
+        "aps-environment": "development",
+        "com.apple.security.application-groups": [
+          "group.com.himanshujha.forgettingstage.onesignal"
+        ]
+      }
     },
     "android": {
       "package": "com.himanshujha.forgettingstage",
@@ -26,6 +38,17 @@
       "shortName": "Forgetting Stage",
       "themeColor": "#090807",
       "backgroundColor": "#090807"
-    }
+    },
+    "plugins": [
+      [
+        "onesignal-expo-plugin",
+        {
+          "mode": "development",
+          "smallIconAccentColor": "#E8B44F"
+        }
+      ],
+      "@layers/expo",
+      "expo-tracking-transparency"
+    ]
   }
 }

@@ -10,9 +10,24 @@ import { cleanOutput, TheaterEngine } from './theater.ts';
 import { MAX_PINS, type Character } from './types.ts';
 
 const CAST: Character[] = [
-  { name: 'Meera', emoji: '🌸', persona: 'the bride, brisk and certain' },
-  { name: 'Arun', emoji: '🎩', persona: 'the groom, permanently bewildered' },
-  { name: 'Auntie', emoji: '🫖', persona: 'an aunt with opinions' },
+  {
+    name: 'Meera',
+    emoji: '🌸',
+    persona: 'the bride',
+    style: 'brisk and certain',
+  },
+  {
+    name: 'Arun',
+    emoji: '🎩',
+    persona: 'the groom',
+    style: 'romantic and permanently bewildered',
+  },
+  {
+    name: 'Auntie',
+    emoji: '🫖',
+    persona: 'an aunt',
+    style: 'loudly opinionated',
+  },
 ];
 
 // Deterministic stand-in for the model tokenizer: one token per word.
@@ -31,9 +46,9 @@ function play(e: TheaterEngine, lines: string[]) {
   }
 }
 
-test('losing a seed queues a probe naming what was lost', () => {
+test('losing a seed queues two structured probes for consecutive responses', () => {
   // Big enough that the opening fits intact, small enough that beats evict it.
-  const e = engine(60);
+  const e = engine(70);
   e.prepareOpening('a wedding where nobody agrees who is marrying whom');
   e.commitOpening('The hall is full.');
   assert.equal(e.nextProbe(), null, 'nothing lost yet, nothing to ask about');
@@ -43,10 +58,21 @@ test('losing a seed queues a probe naming what was lost', () => {
     e.commitBeat(speaker, `Line ${i} carrying a good number of extra words to burn budget.`);
   }
 
-  const probe = e.nextProbe();
-  assert.ok(probe, 'an evicted seed must queue a probe');
-  assert.match(probe, /state plainly/i);
-  assert.notEqual(e.nextProbe(), probe, 'a probe is asked once, then consumed');
+  const first = e.nextProbe();
+  assert.ok(first, 'an evicted seed must queue a probe');
+  assert.equal(first.responseIndex, 1);
+  assert.equal(first.responseCount, 2);
+  assert.equal(first.lostSeed.id, e.forgotten[0]!.id);
+  assert.notEqual(first.lostSeed, e.forgotten[0], 'the probe must carry a seed copy');
+  assert.match(first.instruction, /state plainly/i);
+
+  const second = e.nextProbe();
+  assert.ok(second, 'consuming one probe must leave its second response queued');
+  assert.equal(second.responseIndex, 2);
+  assert.equal(second.responseCount, 2);
+  assert.equal(second.lostSeed.id, first.lostSeed.id);
+  assert.notEqual(second.lostSeed, first.lostSeed, 'each probe must return a defensive copy');
+  assert.equal(e.nextProbe(), null, 'consuming both probes exhausts the lost seed probe');
 });
 
 test('opening seeds the premise and the cast into memory', () => {
@@ -110,6 +136,8 @@ test('a pinned beat survives while unpinned beats around it are evicted', () => 
     e.forgotten.some((b) => b.id === pinnedBeat.id),
     false,
   );
+  assert.ok(e.unpinnedMemoryTokens() <= e.budget, 'all forgettable memory stays under cap');
+  assert.ok(e.memoryTokens() >= e.unpinnedMemoryTokens(), 'the pinned truth is reported separately');
 });
 
 test('pins are capped', () => {
