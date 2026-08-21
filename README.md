@@ -19,7 +19,9 @@ the player composes rather than competes.
 
 The repository now includes a mobile-first Expo game with premise selection, a live AI stage, the final drift report and a RevenueCat-powered Director's Pass. One complete AI performance is free per local calendar day and refreshes at midnight; the `directors_pass` entitlement unlocks unlimited performances. If live generation is unavailable, the current turn falls back to a deterministic performance without breaking the game.
 
-![The Forgetting Stage frontend](assets/day-3-frontend-showcase.png)
+![The Forgetting Stage web lobby](assets/forgetting-stage-web-showcase.png)
+
+This is current **web-build evidence** of the real lobby, captured at a 393 by 852 CSS-pixel viewport with a device scale factor of 3, producing a 1179 by 2556 PNG. It is not the official target-device submission screenshot. Follow the device evidence checklist in [docs/submission/device-validation.md](docs/submission/device-validation.md) before submitting.
 
 ```bash
 npm install
