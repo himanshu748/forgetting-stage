@@ -10,6 +10,7 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  StatusBar as NativeStatusBar,
   Text,
   TextInput,
   useWindowDimensions,
@@ -68,6 +69,8 @@ const revenueCat = createRevenueCatClient({
   publicKeys: publicConfig.revenueCat,
   loadPurchases: () => import('react-native-purchases'),
 });
+
+const androidStatusBarHeight = Platform.OS === 'android' ? NativeStatusBar.currentHeight ?? 0 : 0;
 
 type ButtonProps = {
   label: string;
@@ -895,7 +898,7 @@ export default function App() {
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: colors.ink },
   flex: { flex: 1 },
-  safeArea: { flex: 1, backgroundColor: colors.ink },
+  safeArea: { flex: 1, backgroundColor: colors.ink, paddingTop: androidStatusBarHeight },
   lobbyScroll: { flexGrow: 1, paddingHorizontal: '5%', paddingTop: 22, paddingBottom: 44 },
   wordmark: { borderBottomWidth: 1, borderBottomColor: colors.line, paddingBottom: 18, marginBottom: 42 },
   wordmarkKicker: { color: colors.gold, fontSize: 10, letterSpacing: 2.5, fontWeight: '800' },
