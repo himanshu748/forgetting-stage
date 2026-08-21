@@ -99,7 +99,55 @@ NODE_ENV=production ./android/gradlew :app:assembleRelease
 
 ---
 
-### Task 4: Final branch and submission-readiness review
+### Task 4A: Close the cold-start daily-pass race
+
+**Files:**
+
+- Modify: `App.tsx`
+- Modify: `src/monetization/bootstrap.ts`
+- Modify: `src/monetization/bootstrap.test.ts`
+
+**Requirements:**
+
+- Keep the curtain action disabled until the persisted daily ledger is resolved.
+- Never normalize a missing startup ledger into a fresh performance grant from the start handler.
+- Ensure a RevenueCat request that never settles cannot hold the local access gate forever.
+- Add deterministic delayed-ledger and non-settling-RevenueCat regression tests.
+
+**Verify:**
+
+```bash
+npm test
+npm run typecheck
+```
+
+---
+
+### Task 4B: Make the generation capacity cap resistant to spoofed client fields
+
+**Files:**
+
+- Modify: `src/live/gateway.ts`
+- Modify: `src/live/gateway.test.ts`
+- Modify: `README.md` only if the documented limit semantics change
+
+**Requirements:**
+
+- Do not trust caller-supplied `X-Forwarded-For` by default.
+- Varying forwarded headers and `performanceId` values must not evade the protective request cap.
+- Preserve deterministic limiter injection and existing safe gateway behavior.
+- Add a regression test in which request 31 is rejected before provider work.
+
+**Verify:**
+
+```bash
+npm test
+npm run typecheck
+```
+
+---
+
+### Task 5: Final branch and submission-readiness review
 
 **Scope:**
 
