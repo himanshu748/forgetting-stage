@@ -1,4 +1,5 @@
 import {
+  ledgerFromState,
   normalizeDailyPass,
   type DailyPassLedger,
   type DailyPassState,
@@ -12,51 +13,49 @@ export const unconfiguredMonetization: MonetizationStatus = {
   packages: [],
 };
 
-export const DEFAULT_REVENUECAT_TIMEOUT_MS = 750;
-
 export type MonetizationBootstrap = {
-  monetization: MonetizationStatus;
-  pass: DailyPassState;
+  /** Resolves as soon as persisted local access is available. */
+  pass: Promise<DailyPassState>;
+  /** Settles independently, including after local access has opened. */
+  monetization: Promise<MonetizationStatus>;
 };
 
 export type BootstrapMonetizationOptions = {
   loadLedger: () => Promise<DailyPassLedger | null>;
   refreshRevenueCat: () => Promise<MonetizationStatus>;
   now?: Date;
-  /** Bounds a stalled RevenueCat startup request so local access can load. */
-  revenueCatTimeoutMs?: number;
-  /** Injectable only to keep timeout coverage deterministic. */
-  waitForRevenueCatTimeout?: (milliseconds: number) => Promise<void>;
 };
 
-function waitForTimeout(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+export function reconcilePassWithMonetization(
+  pass: DailyPassState | null,
+  monetization: MonetizationStatus,
+  now = new Date(),
+): DailyPassState | null {
+  if (!pass) return null;
+  return normalizeDailyPass(ledgerFromState(pass, now), now, monetization.unlimited);
 }
 
 /**
  * Load local access and RevenueCat separately so either temporary failure still
  * leaves the lobby with the most honest state available.
  */
-export async function bootstrapMonetization({
+export function bootstrapMonetization({
   loadLedger,
   refreshRevenueCat,
   now = new Date(),
-  revenueCatTimeoutMs = DEFAULT_REVENUECAT_TIMEOUT_MS,
-  waitForRevenueCatTimeout = waitForTimeout,
-}: BootstrapMonetizationOptions): Promise<MonetizationBootstrap> {
-  const ledgerResult = Promise.resolve()
+}: BootstrapMonetizationOptions): MonetizationBootstrap {
+  let latestMonetization = unconfiguredMonetization;
+  const monetization = Promise.resolve()
+    .then(refreshRevenueCat)
+    .catch(() => unconfiguredMonetization)
+    .then((status) => {
+      latestMonetization = status;
+      return status;
+    });
+  const pass = Promise.resolve()
     .then(loadLedger)
-    .catch(() => null);
-  const revenueCatResult = Promise.race([
-    Promise.resolve()
-      .then(refreshRevenueCat)
-      .catch(() => unconfiguredMonetization),
-    waitForRevenueCatTimeout(revenueCatTimeoutMs).then(() => unconfiguredMonetization),
-  ]);
-  const [ledger, monetization] = await Promise.all([ledgerResult, revenueCatResult]);
+    .catch(() => null)
+    .then((ledger) => normalizeDailyPass(ledger, now, latestMonetization.unlimited));
 
-  return {
-    monetization,
-    pass: normalizeDailyPass(ledger, now, monetization.unlimited),
-  };
+  return { pass, monetization };
 }

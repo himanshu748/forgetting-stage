@@ -43,7 +43,11 @@ import {
   normalizeDailyPass,
   type DailyPassState,
 } from './src/monetization/daily-pass.ts';
-import { bootstrapMonetization, unconfiguredMonetization } from './src/monetization/bootstrap.ts';
+import {
+  bootstrapMonetization,
+  reconcilePassWithMonetization,
+  unconfiguredMonetization,
+} from './src/monetization/bootstrap.ts';
 import { dailyPassAccess } from './src/monetization/access.ts';
 import {
   createRevenueCatClient,
@@ -257,7 +261,14 @@ function Lobby({
                 else onShowPaywall();
               }}
             />
-            {!pass?.unlimited && <ActionButton label="View Director's Pass" variant="ticket" onPress={onShowPaywall} />}
+            {!pass?.unlimited && (
+              <ActionButton
+                label={access === 'checking' ? 'Checking box office...' : "View Director's Pass"}
+                variant="ticket"
+                disabled={access === 'checking'}
+                onPress={onShowPaywall}
+              />
+            )}
             <Text style={styles.demoNote}>A RevenueCat entitlement unlocks unlimited performances. Offline preview remains available.</Text>
           </View>
         </View>
@@ -725,14 +736,19 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    void bootstrapMonetization({
+    const startup = bootstrapMonetization({
       loadLedger: () => ledgerStorage.load(),
       refreshRevenueCat: () => revenueCat.status(),
-    }).then((result) => {
-        if (!active) return;
-        setMonetization(result.monetization);
-        setPass(result.pass);
-      });
+    });
+    void startup.pass.then((loadedPass) => {
+      if (!active) return;
+      setPass(loadedPass);
+    });
+    void startup.monetization.then((status) => {
+      if (!active) return;
+      setMonetization(status);
+      setPass((current) => reconcilePassWithMonetization(current, status));
+    });
     return () => { active = false; };
   }, []);
 
@@ -807,11 +823,7 @@ export default function App() {
 
   const updateMonetization = (status: MonetizationStatus) => {
     setMonetization(status);
-    setPass((current) => normalizeDailyPass(
-      current ? ledgerFromState(current) : null,
-      new Date(),
-      status.unlimited,
-    ));
+    setPass((current) => reconcilePassWithMonetization(current, status));
     if (status.unlimited) setPaywallVisible(false);
   };
 
