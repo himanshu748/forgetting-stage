@@ -73,6 +73,8 @@ Install and configure a RevenueCat project with:
 - Offering: a current offering containing the Director's Pass package
 - A Test Store product for development, then platform products before store release
 
+The submission preview uses RevenueCat project `4c98413b`. Its current Test Store offering contains monthly, annual and lifetime Director's Pass products plus the consumable `encore_ticket` package. The `monthly` Test Store purchase was observed in the Android development client on 21 August 2026 and activated the `directors_pass` entitlement. This is sandbox evidence, not a real-money transaction or store-release claim.
+
 The app checks, purchases and restores the entitlement through `react-native-purchases`. Test Store use requires an explicit preview flag, so a leftover test key cannot silently override a platform key:
 
 ```bash
@@ -171,7 +173,7 @@ and drift is derived from beat attribution so it needs no extra model call.
 
 ## Status
 
-The native Expo game, pure memory engine, matched experiment backend, server-authoritative live-generation loop, exact serving-model tokenizer, daily free curtain, RevenueCat adapter, OneSignal reminder and Layers experiment hook are implemented. Local Android API 36 debug and release-mode builds pass, and an emulator fresh-install preflight reaches the honestly labeled offline performance. Unit and integration tests do not prove external dashboards, live model inference or a physical-device run. Submission still requires a real RevenueCat project and product, an observed Test Store purchase and restore, a deployed persistent generation endpoint, OneSignal and Layers App IDs, native build evidence, student proof for Next Gen and the required public video.
+The native Expo game, pure memory engine, matched experiment backend, server-authoritative live-generation loop, exact serving-model tokenizer, daily free curtain, RevenueCat adapter, OneSignal reminder and Layers experiment hook are implemented. Local Android API 36 debug and release-mode builds pass, and an emulator fresh-install preflight reaches the honestly labeled offline performance. The native RevenueCat Test Store offering and a simulated Director's Pass subscription have also been observed end to end. Unit and integration tests do not prove live model inference, physical-device restore, OneSignal delivery or Layers dashboard results. Submission still requires a deployed persistent generation endpoint, OneSignal and Layers App IDs if those tracks are claimed, physical target-device evidence, student proof for Next Gen and the required public video.
 
 ## Licence
 
