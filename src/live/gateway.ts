@@ -9,6 +9,7 @@ const DEFAULT_MODEL = 'meta-llama/Llama-3.1-8B-Instruct';
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 16_000;
 const MAX_PERFORMANCE_STEPS = 20;
+const SHARED_CAPACITY_BUCKET = 'serverless-instance';
 
 export type GatewayRequest = {
   method?: string;
@@ -35,17 +36,6 @@ export type GatewayOptions = {
 };
 
 const defaultLimiter = createRateLimiter({ limit: 30, windowMs: 60_000 });
-
-function header(req: GatewayRequest, name: string): string {
-  const entry = Object.entries(req.headers ?? {}).find(([key]) => key.toLowerCase() === name.toLowerCase());
-  const value = entry?.[1];
-  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
-}
-
-function requestKey(req: GatewayRequest): string {
-  const forwarded = header(req, 'x-forwarded-for').split(',')[0]?.trim();
-  return forwarded || req.socket?.remoteAddress || 'anonymous';
-}
 
 function parseBody(body: unknown): unknown {
   if (typeof body === 'string') {
@@ -126,7 +116,9 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
       return;
     }
 
-    const limit = limiter.take(requestKey(req));
+    // The serverless adapter does not establish a trusted client identity. Treating
+    // forwarding headers as an identity would let callers choose a fresh bucket.
+    const limit = limiter.take(SHARED_CAPACITY_BUCKET);
     res.setHeader('X-RateLimit-Remaining', limit.remaining);
     if (!limit.allowed) {
       res.setHeader('Retry-After', limit.retryAfterSeconds);

@@ -88,6 +88,38 @@ test('returns 429 before provider work when rate limited', async () => {
   assert.equal((second.record.body as { code: string }).code, 'rate_limited');
 });
 
+test('uses the shared generation capacity limit when forwarding headers and performance ids are spoofed', async () => {
+  let providerCalls = 0;
+  const handler = createGenerateHandler({
+    env: { HF_TOKEN: 'server-secret' },
+    fetchImpl: async () => {
+      providerCalls += 1;
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: 'The curtain rises.' } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+
+  let finalStatus = 0;
+  for (let index = 0; index < 31; index += 1) {
+    const { record, response } = responseRecorder();
+    await handler({
+      method: 'POST',
+      headers: { 'x-forwarded-for': `203.0.113.${index + 1}` },
+      socket: { remoteAddress: `198.51.100.${index + 1}` },
+      body: {
+        kind: 'opening',
+        premiseId: 'wedding',
+        performanceId: `spoofed-performance-${index}`,
+      },
+    }, response);
+    finalStatus = record.status;
+  }
+
+  assert.equal(finalStatus, 429);
+  assert.equal(providerCalls, 30);
+});
+
 test('returns a safe provider error without leaking response details', async () => {
   const handler = createGenerateHandler({
     env: { HF_TOKEN: 'server-secret' },

@@ -32,7 +32,7 @@ Use `npm run ios`, `npm run android` or `npm run web` for a specific platform. D
 
 ## Live AI gateway
 
-The mobile client calls the narrow `POST /api/generate` contract. The server validates the premise and speaker against the shipped game content, reconstructs system prompts itself, caps body and script sizes, rate-limits by caller, applies a provider timeout and returns safe errors. `HF_TOKEN` remains server-only.
+The mobile client calls the narrow `POST /api/generate` contract. The server validates the premise and speaker against the shipped game content, reconstructs system prompts itself, caps body and script sizes, enforces a 30-request-per-minute shared capacity cap per serverless instance, applies a provider timeout and returns safe errors. It deliberately does not trust caller-supplied forwarding headers as identity. `HF_TOKEN` remains server-only.
 
 ```bash
 HF_TOKEN=hf_xxx MODEL=meta-llama/Llama-3.1-8B-Instruct npx vercel dev
