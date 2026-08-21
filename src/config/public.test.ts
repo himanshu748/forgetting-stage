@@ -17,14 +17,16 @@ test('keeps an absolute HTTPS endpoint for native builds', () => {
   );
 });
 
-test('chooses RevenueCat test and platform keys from an explicit key object', () => {
+test('chooses the Test Store only when preview mode is explicit', () => {
   const keys = {
     test: 'test_public_key',
     ios: 'ios_public_key',
     android: 'android_public_key',
   };
-  assert.equal(resolveRevenueCatPublicKey('ios', keys), 'test_public_key');
-  assert.equal(resolveRevenueCatPublicKey('android', { ...keys, test: undefined }), 'android_public_key');
-  assert.equal(resolveRevenueCatPublicKey('ios', { ...keys, test: undefined }), 'ios_public_key');
+  assert.equal(resolveRevenueCatPublicKey('ios', { ...keys, useTestStore: true }), 'test_public_key');
+  assert.equal(resolveRevenueCatPublicKey('android', { ...keys, useTestStore: true }), 'test_public_key');
+  assert.equal(resolveRevenueCatPublicKey('android', keys), 'android_public_key');
+  assert.equal(resolveRevenueCatPublicKey('ios', keys), 'ios_public_key');
+  assert.equal(resolveRevenueCatPublicKey('android', { test: 'test_public_key', useTestStore: false }), null);
   assert.equal(resolveRevenueCatPublicKey('web', keys), null);
 });

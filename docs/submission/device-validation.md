@@ -11,16 +11,17 @@ Use this runbook only on a physical Android device with an EAS Android preview b
 - Test Store product or package URL: `TODO: add the observed store or product URL`
 - Public media URL: `TODO: add the published demo video URL`
 
-The checked-in app does not establish that any of these external services are configured. A Test Store key is for development and preview builds only, never an app-store release. This project declares `react-native-purchases` 10.6.0, which meets Test Store's React Native SDK minimum of 9.5.4. EAS preview builds use EAS-managed Android credentials, so the repository's checked-in debug signing configuration is not a preview-build blocker.
+The checked-in app does not establish that any of these external services are configured. A Test Store key is for development and preview builds only, never an app-store release. This project declares `react-native-purchases` 10.6.0, which meets Test Store's React Native SDK minimum of 9.5.4. EAS preview builds use EAS-managed Android credentials. Direct release builds do not select the debug certificate by default. The optional `-PallowDebugReleaseSigning=true` property exists only for local emulator validation and its APK must never be distributed as a release.
 
 ## Prepare the preview build
 
 1. In the RevenueCat dashboard, create the Director's Pass Test Store product and package. Attach that product to the `directors_pass` entitlement, then add the package to the current offering. Record the RevenueCat project ID and Test Store public SDK key in the submission record only after verifying them.
-2. Configure the Test Store public SDK key for the EAS preview environment as `EXPO_PUBLIC_REVENUECAT_TEST_API_KEY`.
-3. Deploy the generation gateway to an HTTPS URL, then configure that URL for the EAS preview environment as `EXPO_PUBLIC_GENERATION_ENDPOINT`. Keep the endpoint URL as a TODO until it has been observed in the completed preview configuration.
-4. Do not add secret RevenueCat API keys or `HF_TOKEN` to the app, build logs or repository.
-5. Build the Android preview artifact with `eas build --platform android --profile preview`. Wait for it to finish, then replace the build URL TODO with the observed EAS URL.
-6. Download the completed artifact from that EAS URL and install it on the physical Android device. Confirm that the installed app opens to The Forgetting Stage lobby.
+2. Configure `EXPO_PUBLIC_REVENUECAT_USE_TEST_STORE=true` and the Test Store public SDK key as `EXPO_PUBLIC_REVENUECAT_TEST_API_KEY` for the EAS preview environment. Production must set the flag to false or omit it.
+3. Before public gateway deployment, configure a hard Hugging Face spending limit and either a durable shared request quota or server-verifiable performance authorization. The checked-in in-memory limiter is only per serverless instance.
+4. Deploy the generation gateway to an HTTPS URL, then configure that URL for the EAS preview environment as `EXPO_PUBLIC_GENERATION_ENDPOINT`. Keep the endpoint URL as a TODO until it has been observed in the completed preview configuration.
+5. Do not add secret RevenueCat API keys or `HF_TOKEN` to the app, build logs or repository.
+6. Build the Android preview artifact with `eas build --platform android --profile preview`. Wait for it to finish, then replace the build URL TODO with the observed EAS URL.
+7. Download the completed artifact from that EAS URL and install it on the physical Android device. Confirm that the installed app opens to The Forgetting Stage lobby.
 
 ## Fresh-install and five-round play
 
@@ -51,5 +52,7 @@ The checked-in app does not establish that any of these external services are co
 
 1. Capture the approved target-device lobby or gameplay evidence at exactly **1179 by 2556** pixels. Do not add a device frame.
 2. Do not use `assets/forgetting-stage-web-showcase.png` as that approved target-device capture. It is an actual web-build lobby capture at the same pixel dimensions, not native device evidence.
-3. Publish a publicly accessible demonstration video that is under two minutes, then replace the public media URL TODO with the observed URL.
-4. Before submission, verify that the target-device screenshot, the public video and the dashboard identifiers above all correspond to the same observed preview configuration.
+3. Record the demonstration on the physical Android device the preview build targets. Show the installed app and the observed judge path, not a browser substitute.
+4. Keep the demonstration under two minutes and use only project-owned or properly licensed visual, music and audio material.
+5. Publish the video through YouTube or Vimeo with public access, then replace the public media URL TODO with the observed URL.
+6. Before submission, verify that the target-device screenshot, the public video and the dashboard identifiers above all correspond to the same observed preview configuration.

@@ -47,7 +47,7 @@ test('configures once, exposes offerings and unlocks after purchase', async () =
   };
   const client = createRevenueCatClient({
     platform: 'ios',
-    publicKeys: { test: 'test_public_key' },
+    publicKeys: { test: 'test_public_key', useTestStore: true },
     loadPurchases: async () => ({ default: module }),
   });
   const status = await client.status();

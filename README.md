@@ -34,6 +34,8 @@ Use `npm run ios`, `npm run android` or `npm run web` for a specific platform. D
 
 The mobile client calls the narrow `POST /api/generate` contract. The server validates the premise and speaker against the shipped game content, reconstructs system prompts itself, caps body and script sizes, enforces a 30-request-per-minute shared capacity cap per serverless instance, applies a provider timeout and returns safe errors. It deliberately does not trust caller-supplied forwarding headers as identity. `HF_TOKEN` remains server-only.
 
+That in-memory cap is not deployment-wide authorization. Before exposing the gateway publicly, add a durable shared quota or server-verifiable performance authorization and set a hard provider spending limit. The repository does not claim those deployment controls are configured.
+
 ```bash
 HF_TOKEN=hf_xxx MODEL=meta-llama/Llama-3.1-8B-Instruct npx vercel dev
 ```
@@ -54,16 +56,18 @@ Install and configure a RevenueCat project with:
 - Offering: a current offering containing the Director's Pass package
 - A Test Store product for development, then platform products before store release
 
-The app checks, purchases and restores the entitlement through `react-native-purchases`. Set one public key for development or the platform keys for release:
+The app checks, purchases and restores the entitlement through `react-native-purchases`. Test Store use requires an explicit preview flag, so a leftover test key cannot silently override a platform key:
 
 ```bash
+EXPO_PUBLIC_REVENUECAT_USE_TEST_STORE=true
 EXPO_PUBLIC_REVENUECAT_TEST_API_KEY=test_xxx
 # Release builds instead use:
+EXPO_PUBLIC_REVENUECAT_USE_TEST_STORE=false
 EXPO_PUBLIC_REVENUECAT_IOS_API_KEY=appl_xxx
 EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY=goog_xxx
 ```
 
-These are RevenueCat public SDK keys intended for the app bundle, not secret RevenueCat API keys. Never put a secret API key in an `EXPO_PUBLIC_` variable.
+These are RevenueCat public SDK keys intended for the app bundle, not secret RevenueCat API keys. Never put a secret API key in an `EXPO_PUBLIC_` variable. Production should omit the Test Store key as an additional safeguard.
 
 The one-free-performance ledger is stored locally and resets on the next local calendar day. Director's Pass holders bypass the ledger. RevenueCat's Test Store can simulate success, failure and cancellation, but real native purchase testing requires an Expo development build rather than ordinary Expo Go. Never ship a Test Store API key in a production build.
 

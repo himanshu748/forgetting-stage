@@ -147,6 +147,37 @@ npm run typecheck
 
 ---
 
+### Task 4C: Harden preview and release configuration
+
+**Files:**
+
+- Modify: `src/config/public.ts`
+- Modify: `src/config/public.test.ts`
+- Modify: `src/monetization/revenuecat.test.ts`
+- Modify: `.env.example`
+- Modify: `README.md`
+- Modify: `android/app/build.gradle`
+- Modify: `docs/submission/device-validation.md`
+- Modify: `.gitignore`
+
+**Requirements:**
+
+- Select the RevenueCat Test Store only through an explicit preview flag. A present test key must not override platform keys by itself.
+- Do not sign direct release builds with the public debug key unless an explicit emulator-only Gradle property is supplied.
+- Record the exact device-video hosting, duration and licensing constraints in the runbook.
+- Ignore Gradle's generated Android Kotlin session cache.
+
+**Verify:**
+
+```bash
+npm test
+npm run typecheck
+NODE_ENV=production ./android/gradlew :app:assembleRelease
+NODE_ENV=production ./android/gradlew :app:assembleRelease -PallowDebugReleaseSigning=true
+```
+
+---
+
 ### Task 5: Final branch and submission-readiness review
 
 **Scope:**

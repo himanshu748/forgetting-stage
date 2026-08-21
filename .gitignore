@@ -8,4 +8,5 @@ artifacts/
 .expo/
 dist/
 web-build/
+android/.kotlin/
 *.tsbuildinfo
