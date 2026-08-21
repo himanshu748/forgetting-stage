@@ -6,6 +6,7 @@ Use this runbook only on a physical Android device with an EAS Android preview b
 
 - RevenueCat project ID: `TODO: record the configured project ID`
 - RevenueCat Test Store public SDK key: `TODO: record the preview key, never a secret API key`
+- Deployed generation endpoint URL: `TODO: record the HTTPS endpoint used by the preview build`
 - EAS Android preview build URL: `TODO: add the completed build URL`
 - Test Store product or package URL: `TODO: add the observed store or product URL`
 - Public media URL: `TODO: add the published demo video URL`
@@ -14,18 +15,21 @@ The checked-in app does not establish that any of these external services are co
 
 ## Prepare the preview build
 
-1. In the RevenueCat dashboard, configure the `directors_pass` entitlement, a current offering and a Test Store product. Record the RevenueCat project ID and Test Store public SDK key in the submission record only after verifying them.
-2. Configure the Test Store public SDK key for the EAS preview environment as `EXPO_PUBLIC_REVENUECAT_TEST_API_KEY`. Do not add secret RevenueCat API keys or `HF_TOKEN` to the app, build logs or repository.
-3. Build the Android preview artifact with `eas build --platform android --profile preview`. Wait for it to finish, then replace the build URL TODO with the observed EAS URL.
-4. Download the completed artifact from that EAS URL and install it on the physical Android device. Confirm that the installed app opens to The Forgetting Stage lobby.
+1. In the RevenueCat dashboard, create the Director's Pass Test Store product and package. Attach that product to the `directors_pass` entitlement, then add the package to the current offering. Record the RevenueCat project ID and Test Store public SDK key in the submission record only after verifying them.
+2. Configure the Test Store public SDK key for the EAS preview environment as `EXPO_PUBLIC_REVENUECAT_TEST_API_KEY`.
+3. Deploy the generation gateway to an HTTPS URL, then configure that URL for the EAS preview environment as `EXPO_PUBLIC_GENERATION_ENDPOINT`. Keep the endpoint URL as a TODO until it has been observed in the completed preview configuration.
+4. Do not add secret RevenueCat API keys or `HF_TOKEN` to the app, build logs or repository.
+5. Build the Android preview artifact with `eas build --platform android --profile preview`. Wait for it to finish, then replace the build URL TODO with the observed EAS URL.
+6. Download the completed artifact from that EAS URL and install it on the physical Android device. Confirm that the installed app opens to The Forgetting Stage lobby.
 
 ## Fresh-install and five-round play
 
 1. Uninstall any existing copy of The Forgetting Stage, then install the preview artifact. This is the fresh-install observation.
-2. Open the app, select a premise and start a performance.
-3. Complete all five rounds. At least once, pin exactly one actor line when the stage presents the choice.
-4. Reach the curtain and inspect the drift report. Confirm that the run completed rather than stopping before the fifth round.
-5. Record the device model, Android version, build URL and the time of the observed run in the submission notes.
+2. With the device online, open the app, select a premise and start a performance.
+3. Observe and record at least one live-generated turn from the deployed HTTPS endpoint. Do not treat a deterministic fallback turn as live-generation evidence.
+4. Complete all five rounds. At least once, pin exactly one actor line when the stage presents the choice.
+5. Reach the curtain and inspect the drift report. Confirm that the run completed rather than stopping before the fifth round.
+6. Record the device model, Android version, build URL, endpoint URL and the time of the observed run in the submission notes.
 
 ## Test Store purchase, entitlement and restore
 
@@ -37,10 +41,11 @@ The checked-in app does not establish that any of these external services are co
 
 ## Offline recovery
 
-1. Keep the installed preview build after the restore test, then disable network access with airplane mode or by disabling both Wi-Fi and mobile data.
-2. Reopen the app and begin another performance.
-3. Complete five rounds using the deterministic offline fallback. Confirm the app explains that live AI was unavailable and that the performance continues to curtain.
-4. Return the device online and confirm the lobby remains usable. Record any failure rather than substituting a claim of recovery.
+1. Keep the installed preview build after the restore test. Confirm it is the same configuration that produced the recorded live-generated turn.
+2. Enable airplane mode or disable both Wi-Fi and mobile data, then reopen the app and begin another performance.
+3. Capture the app's honest fallback indicator that live AI was unavailable. Do not represent this fallback indicator as a live request.
+4. Complete five rounds using the deterministic offline fallback and confirm that the performance continues to curtain.
+5. Return the device online and confirm the lobby remains usable. Record any failure rather than substituting a claim of recovery.
 
 ## Required final capture and public video
 
