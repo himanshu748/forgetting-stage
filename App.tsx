@@ -42,6 +42,7 @@ import {
   normalizeDailyPass,
   type DailyPassState,
 } from './src/monetization/daily-pass.ts';
+import { bootstrapMonetization, unconfiguredMonetization } from './src/monetization/bootstrap.ts';
 import {
   createRevenueCatClient,
   isEncorePackage,
@@ -67,11 +68,6 @@ const revenueCat = createRevenueCatClient({
   publicKeys: publicConfig.revenueCat,
   loadPurchases: () => import('react-native-purchases'),
 });
-const emptyMonetization: MonetizationStatus = {
-  configured: false,
-  unlimited: false,
-  packages: [],
-};
 
 type ButtonProps = {
   label: string;
@@ -700,7 +696,7 @@ export default function App() {
   const [performance, setPerformance] = useState<PerformanceSession | null>(null);
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<DailyPassState | null>(null);
-  const [monetization, setMonetization] = useState(emptyMonetization);
+  const [monetization, setMonetization] = useState(unconfiguredMonetization);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallBusy, setPaywallBusy] = useState(false);
   const [paywallError, setPaywallError] = useState<string | null>(null);
@@ -714,14 +710,13 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([ledgerStorage.load(), revenueCat.status()])
-      .then(([ledger, status]) => {
+    void bootstrapMonetization({
+      loadLedger: () => ledgerStorage.load(),
+      refreshRevenueCat: () => revenueCat.status(),
+    }).then((result) => {
         if (!active) return;
-        setMonetization(status);
-        setPass(normalizeDailyPass(ledger, new Date(), status.unlimited));
-      })
-      .catch(() => {
-        if (active) setPass(normalizeDailyPass(null, new Date(), false));
+        setMonetization(result.monetization);
+        setPass(result.pass);
       });
     return () => { active = false; };
   }, []);
