@@ -44,6 +44,7 @@ import {
   type DailyPassState,
 } from './src/monetization/daily-pass.ts';
 import { bootstrapMonetization, unconfiguredMonetization } from './src/monetization/bootstrap.ts';
+import { dailyPassAccess } from './src/monetization/access.ts';
 import {
   createRevenueCatClient,
   isEncorePackage,
@@ -164,6 +165,7 @@ function Lobby({
   const [selected, setSelected] = useState(PREMISES[0]?.id ?? 'wedding');
   const compact = width < 760;
   const choice = PREMISES.find((item) => item.id === selected) ?? PREMISES[0];
+  const access = dailyPassAccess(pass);
   if (!choice) return null;
 
   return (
@@ -225,9 +227,13 @@ function Lobby({
               </View>
             </View>
             <View style={styles.dailyPassPanel}>
-              <Text style={styles.dailyPassKicker}>{pass?.unlimited ? "DIRECTOR'S PASS ACTIVE" : 'DAILY CURTAIN'}</Text>
+              <Text style={styles.dailyPassKicker}>
+                {access === 'checking' ? 'CHECKING DAILY ACCESS' : pass?.unlimited ? "DIRECTOR'S PASS ACTIVE" : 'DAILY CURTAIN'}
+              </Text>
               <Text style={styles.dailyPassCopy}>
-                {pass?.unlimited
+                {access === 'checking'
+                  ? 'Checking today’s curtain before we admit the company.'
+                  : pass?.unlimited
                   ? 'Unlimited performances are unlocked.'
                   : pass && pass.remaining < 1
                     ? pass.encores > 0
@@ -237,11 +243,17 @@ function Lobby({
               </Text>
             </View>
             <ActionButton
-              label={!pass || canStartPerformance(pass)
-                ? pass && pass.remaining < 1 && !pass.unlimited ? 'Use an encore' : 'Raise the curtain'
-                : 'See tonight’s options'}
+              label={access === 'checking'
+                ? 'Checking access...'
+                : access === 'start' && pass && pass.remaining < 1 && !pass.unlimited
+                  ? 'Use an encore'
+                  : access === 'start'
+                    ? 'Raise the curtain'
+                    : 'See tonight’s options'}
+              disabled={access === 'checking'}
               onPress={() => {
-                if (!pass || canStartPerformance(pass)) void onStart(choice);
+                if (access === 'checking') return;
+                if (access === 'start') void onStart(choice);
                 else onShowPaywall();
               }}
             />
@@ -750,8 +762,11 @@ export default function App() {
   };
 
   const start = async (choice: PremiseOption) => {
+    // A null pass means persisted daily access has not loaded yet. It must
+    // never be normalized as an unused day and admitted to the stage.
+    if (!pass) return;
     const currentPass = normalizeDailyPass(
-      pass ? ledgerFromState(pass) : null,
+      ledgerFromState(pass),
       new Date(),
       monetization.unlimited,
     );
