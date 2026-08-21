@@ -28,10 +28,15 @@ test('loads the daily ledger and RevenueCat state at startup', async () => {
     refreshRevenueCat: async () => paidStatus,
     now,
   });
-  const [loadedPass, monetization] = await Promise.all([startup.pass, startup.monetization]);
+  const [loadedPass, ledgerAvailable, monetization] = await Promise.all([
+    startup.pass,
+    startup.ledgerAvailable,
+    startup.monetization,
+  ]);
   const pass = reconcilePassWithMonetization(loadedPass, monetization, now);
 
   assert.deepEqual(monetization, paidStatus);
+  assert.equal(ledgerAvailable, true);
   assert.equal(pass?.used, 1);
   assert.equal(pass?.encores, 2);
   assert.equal(pass?.unlimited, true);
@@ -43,12 +48,30 @@ test('keeps the RevenueCat state when loading the daily ledger fails', async () 
     refreshRevenueCat: async () => paidStatus,
     now,
   });
-  const [loadedPass, monetization] = await Promise.all([startup.pass, startup.monetization]);
+  const [loadedPass, ledgerAvailable, monetization] = await Promise.all([
+    startup.pass,
+    startup.ledgerAvailable,
+    startup.monetization,
+  ]);
   const pass = reconcilePassWithMonetization(loadedPass, monetization, now);
 
   assert.deepEqual(monetization, paidStatus);
+  assert.equal(ledgerAvailable, false);
   assert.equal(pass?.remaining, Number.POSITIVE_INFINITY);
-  assert.equal(pass?.used, 0);
+  assert.equal(pass?.used, 1);
+});
+
+test('treats a null ledger as a legitimate first launch with one free show', async () => {
+  const startup = bootstrapMonetization({
+    loadLedger: async () => null,
+    refreshRevenueCat: async () => unconfiguredMonetization,
+    now,
+  });
+  const [pass, ledgerAvailable] = await Promise.all([startup.pass, startup.ledgerAvailable]);
+
+  assert.equal(ledgerAvailable, true);
+  assert.equal(pass.remaining, 1);
+  assert.equal(dailyPassAccess(pass, ledgerAvailable), 'start');
 });
 
 test('preserves the daily ledger when refreshing RevenueCat fails', async () => {
@@ -72,11 +95,31 @@ test('uses the unconfigured fallback when both startup operations fail', async (
     refreshRevenueCat: () => { throw new Error('RevenueCat unavailable'); },
     now,
   });
-  const [pass, monetization] = await Promise.all([startup.pass, startup.monetization]);
+  const [pass, ledgerAvailable, monetization] = await Promise.all([
+    startup.pass,
+    startup.ledgerAvailable,
+    startup.monetization,
+  ]);
 
   assert.strictEqual(monetization, unconfiguredMonetization);
-  assert.equal(pass.remaining, 1);
+  assert.equal(ledgerAvailable, false);
+  assert.equal(pass.remaining, 0);
   assert.equal(pass.unlimited, false);
+  assert.equal(dailyPassAccess(pass, ledgerAvailable), 'paywall');
+});
+
+test('fails closed when the ledger rejects and RevenueCat is unconfigured', async () => {
+  const startup = bootstrapMonetization({
+    loadLedger: async () => { throw new Error('storage rejected'); },
+    refreshRevenueCat: async () => unconfiguredMonetization,
+    now,
+  });
+  const [pass, ledgerAvailable] = await Promise.all([startup.pass, startup.ledgerAvailable]);
+
+  assert.equal(ledgerAvailable, false);
+  assert.equal(pass.remaining, 0);
+  assert.equal(pass.encores, 0);
+  assert.equal(dailyPassAccess(pass, ledgerAvailable), 'paywall');
 });
 
 test('waits for a delayed ledger before deciding a spent pass can start', async () => {
@@ -126,6 +169,26 @@ test('opens local access while RevenueCat is pending, then reconciles a late pai
   assert.equal(reconciled?.unlimited, true);
   assert.equal(reconciled?.remaining, Number.POSITIVE_INFINITY);
   assert.equal(dailyPassAccess(reconciled), 'start');
+});
+
+test('keeps a ledger read error locked until a late paid entitlement arrives', async () => {
+  let resolveRevenueCat: ((value: MonetizationStatus) => void) | undefined;
+  const delayedRevenueCat = new Promise<MonetizationStatus>((resolve) => { resolveRevenueCat = resolve; });
+  const startup = bootstrapMonetization({
+    loadLedger: () => { throw new Error('storage unavailable'); },
+    refreshRevenueCat: () => delayedRevenueCat,
+    now,
+  });
+
+  const [lockedPass, ledgerAvailable] = await Promise.all([startup.pass, startup.ledgerAvailable]);
+  assert.equal(ledgerAvailable, false);
+  assert.equal(lockedPass.remaining, 0);
+  assert.equal(dailyPassAccess(lockedPass, ledgerAvailable), 'paywall');
+
+  resolveRevenueCat?.(paidStatus);
+  const reconciled = reconcilePassWithMonetization(lockedPass, await startup.monetization, now);
+  assert.equal(reconciled?.unlimited, true);
+  assert.equal(dailyPassAccess(reconciled, ledgerAvailable), 'start');
 });
 
 test('does not invent access if RevenueCat settles before the ledger', async () => {

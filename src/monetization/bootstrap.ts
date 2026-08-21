@@ -1,5 +1,7 @@
 import {
+  DAILY_FREE_PERFORMANCES,
   ledgerFromState,
+  localDayKey,
   normalizeDailyPass,
   type DailyPassLedger,
   type DailyPassState,
@@ -16,9 +18,15 @@ export const unconfiguredMonetization: MonetizationStatus = {
 export type MonetizationBootstrap = {
   /** Resolves as soon as persisted local access is available. */
   pass: Promise<DailyPassState>;
+  /** False means storage failed, while true also includes a valid null first launch. */
+  ledgerAvailable: Promise<boolean>;
   /** Settles independently, including after local access has opened. */
   monetization: Promise<MonetizationStatus>;
 };
+
+type LedgerLoadResult =
+  | { status: 'loaded'; ledger: DailyPassLedger | null }
+  | { status: 'error' };
 
 export type BootstrapMonetizationOptions = {
   loadLedger: () => Promise<DailyPassLedger | null>;
@@ -52,10 +60,22 @@ export function bootstrapMonetization({
       latestMonetization = status;
       return status;
     });
-  const pass = Promise.resolve()
+  const ledgerResult: Promise<LedgerLoadResult> = Promise.resolve()
     .then(loadLedger)
-    .catch(() => null)
-    .then((ledger) => normalizeDailyPass(ledger, now, latestMonetization.unlimited));
+    .then((ledger) => ({ status: 'loaded' as const, ledger }))
+    .catch(() => ({ status: 'error' as const }));
+  const pass = ledgerResult.then((result) => {
+    const ledger = result.status === 'loaded'
+      ? result.ledger
+      : {
+          dayKey: localDayKey(now),
+          used: DAILY_FREE_PERFORMANCES,
+          encores: 0,
+          lastSeenAt: now.toISOString(),
+        };
+    return normalizeDailyPass(ledger, now, latestMonetization.unlimited);
+  });
+  const ledgerAvailable = ledgerResult.then((result) => result.status === 'loaded');
 
-  return { pass, monetization };
+  return { pass, ledgerAvailable, monetization };
 }

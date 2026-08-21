@@ -37,8 +37,6 @@ import {
 import { createLiveGenerator } from './src/live/client.ts';
 import {
   canStartPerformance,
-  consumePerformance,
-  grantEncore,
   ledgerFromState,
   normalizeDailyPass,
   type DailyPassState,
@@ -49,6 +47,12 @@ import {
   unconfiguredMonetization,
 } from './src/monetization/bootstrap.ts';
 import { dailyPassAccess } from './src/monetization/access.ts';
+import {
+  consumeAndPersistPerformance,
+  consumeSessionEncore,
+  createPerformanceLaunchGate,
+  recordPurchasedEncore,
+} from './src/monetization/launch.ts';
 import {
   createRevenueCatClient,
   isEncorePackage,
@@ -159,17 +163,25 @@ function Rule({ number, title, copy }: { number: string; title: string; copy: st
 function Lobby({
   onStart,
   pass,
+  ledgerAvailable,
+  sessionEncoreCredits,
+  launchBusy,
+  accessMessage,
   onShowPaywall,
 }: {
   onStart: (premise: PremiseOption) => void | Promise<void>;
   pass: DailyPassState | null;
+  ledgerAvailable: boolean | null;
+  sessionEncoreCredits: number;
+  launchBusy: boolean;
+  accessMessage: string | null;
   onShowPaywall: () => void;
 }) {
   const { width } = useWindowDimensions();
   const [selected, setSelected] = useState(PREMISES[0]?.id ?? 'wedding');
   const compact = width < 760;
   const choice = PREMISES.find((item) => item.id === selected) ?? PREMISES[0];
-  const access = dailyPassAccess(pass);
+  const access = dailyPassAccess(pass, ledgerAvailable, sessionEncoreCredits);
   if (!choice) return null;
 
   return (
@@ -232,13 +244,25 @@ function Lobby({
             </View>
             <View style={styles.dailyPassPanel}>
               <Text style={styles.dailyPassKicker}>
-                {access === 'checking' ? 'CHECKING DAILY ACCESS' : pass?.unlimited ? "DIRECTOR'S PASS ACTIVE" : 'DAILY CURTAIN'}
+                {access === 'checking'
+                  ? 'CHECKING DAILY ACCESS'
+                  : pass?.unlimited
+                    ? "DIRECTOR'S PASS ACTIVE"
+                    : ledgerAvailable === false && sessionEncoreCredits > 0
+                      ? 'SESSION ENCORE READY'
+                      : ledgerAvailable === false
+                      ? 'LOCAL ACCESS UNAVAILABLE'
+                      : 'DAILY CURTAIN'}
               </Text>
               <Text style={styles.dailyPassCopy}>
                 {access === 'checking'
                   ? 'Checking today’s curtain before we admit the company.'
                   : pass?.unlimited
                   ? 'Unlimited performances are unlocked.'
+                  : ledgerAvailable === false && sessionEncoreCredits > 0
+                    ? 'Your purchased encore is ready for this run. Local saving is still unavailable.'
+                  : ledgerAvailable === false
+                    ? 'We could not safely verify today’s local ticket. The box office can still restore unlimited access.'
                   : pass && pass.remaining < 1
                     ? pass.encores > 0
                       ? `Today’s free performance is spent. ${pass.encores} encore${pass.encores > 1 ? 's' : ''} waiting.`
@@ -247,14 +271,18 @@ function Lobby({
               </Text>
             </View>
             <ActionButton
-              label={access === 'checking'
+              label={launchBusy
+                ? 'Preparing the stage...'
+                : access === 'checking'
                 ? 'Checking access...'
+                : access === 'start' && ledgerAvailable === false && sessionEncoreCredits > 0
+                  ? 'Use session encore'
                 : access === 'start' && pass && pass.remaining < 1 && !pass.unlimited
                   ? 'Use an encore'
                   : access === 'start'
                     ? 'Raise the curtain'
                     : 'See tonight’s options'}
-              disabled={access === 'checking'}
+              disabled={access === 'checking' || launchBusy}
               onPress={() => {
                 if (access === 'checking') return;
                 if (access === 'start') void onStart(choice);
@@ -265,9 +293,14 @@ function Lobby({
               <ActionButton
                 label={access === 'checking' ? 'Checking box office...' : "View Director's Pass"}
                 variant="ticket"
-                disabled={access === 'checking'}
+                disabled={access === 'checking' || launchBusy}
                 onPress={onShowPaywall}
               />
+            )}
+            {accessMessage && (
+              <Text accessibilityLiveRegion="polite" style={styles.lobbyAccessMessage}>
+                {accessMessage}
+              </Text>
             )}
             <Text style={styles.demoNote}>A RevenueCat entitlement unlocks unlimited performances. Offline preview remains available.</Text>
           </View>
@@ -722,6 +755,10 @@ export default function App() {
   const [performance, setPerformance] = useState<PerformanceSession | null>(null);
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<DailyPassState | null>(null);
+  const [ledgerAvailable, setLedgerAvailable] = useState<boolean | null>(null);
+  const [sessionEncoreCredits, setSessionEncoreCredits] = useState(0);
+  const [launchBusy, setLaunchBusy] = useState(false);
+  const [accessMessage, setAccessMessage] = useState<string | null>(null);
   const [monetization, setMonetization] = useState(unconfiguredMonetization);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallBusy, setPaywallBusy] = useState(false);
@@ -729,6 +766,7 @@ export default function App() {
   const [revision, setRevision] = useState(0);
   const session = performance?.session ?? null;
   const fade = useRef(new Animated.Value(1)).current;
+  const launchGate = useRef(createPerformanceLaunchGate()).current;
   const premise = useMemo(
     () => PREMISES.find((item) => item.id === session?.premiseId) ?? PREMISES[0],
     [session?.premiseId],
@@ -740,8 +778,9 @@ export default function App() {
       loadLedger: () => ledgerStorage.load(),
       refreshRevenueCat: () => revenueCat.status(),
     });
-    void startup.pass.then((loadedPass) => {
+    void Promise.all([startup.pass, startup.ledgerAvailable]).then(([loadedPass, available]) => {
       if (!active) return;
+      setLedgerAvailable(available);
       setPass(loadedPass);
     });
     void startup.monetization.then((status) => {
@@ -778,30 +817,58 @@ export default function App() {
   };
 
   const start = async (choice: PremiseOption) => {
-    // A null pass means persisted daily access has not loaded yet. It must
-    // never be normalized as an unused day and admitted to the stage.
-    if (!pass) return;
-    const currentPass = normalizeDailyPass(
-      ledgerFromState(pass),
-      new Date(),
-      monetization.unlimited,
-    );
-    if (!canStartPerformance(currentPass)) {
-      setPass(currentPass);
-      showPaywall();
-      return;
-    }
-    const consumed = consumePerformance(currentPass);
-    setPass(consumed);
-    await ledgerStorage.save(ledgerFromState(consumed));
+    try {
+      await launchGate.run(async () => {
+        setLaunchBusy(true);
+        setAccessMessage(null);
+        // A null pass or an unavailable ledger is unknown access, never a
+        // fresh daily grant. A confirmed entitlement may bypass local storage.
+        if (!pass) return;
+        const currentPass = normalizeDailyPass(
+          ledgerFromState(pass),
+          new Date(),
+          monetization.unlimited,
+        );
+        if (!canStartPerformance(currentPass)) {
+          setPass(currentPass);
+          showPaywall();
+          return;
+        }
 
-    const next = createPerformanceSession(choice.id, choice.premise);
-    setPerformance(next);
-    setBusy(true);
-    transition('stage');
-    await performanceProvider.open(next);
-    setBusy(false);
-    setRevision((value) => value + 1);
+        let admittedPass: DailyPassState;
+        if (ledgerAvailable !== true && !currentPass.unlimited) {
+          if (sessionEncoreCredits < 1 || currentPass.encores < 1) {
+            setPass(currentPass);
+            showPaywall();
+            return;
+          }
+          admittedPass = consumeSessionEncore(currentPass);
+          setSessionEncoreCredits((value) => Math.max(0, value - 1));
+        } else {
+          const consumption = await consumeAndPersistPerformance({
+            pass: currentPass,
+            saveLedger: (nextLedger) => ledgerStorage.save(nextLedger),
+          });
+          if (consumption.status === 'persistence-error') {
+            setLedgerAvailable(false);
+            setAccessMessage('The curtain stayed up because today’s ticket could not be saved. No performance was spent.');
+            return;
+          }
+          admittedPass = consumption.pass;
+        }
+        setPass(admittedPass);
+
+        const next = createPerformanceSession(choice.id, choice.premise);
+        setPerformance(next);
+        setBusy(true);
+        transition('stage');
+        await performanceProvider.open(next);
+        setBusy(false);
+        setRevision((value) => value + 1);
+      });
+    } finally {
+      setLaunchBusy(launchGate.isActive());
+    }
   };
 
   const advance = async () => {
@@ -830,15 +897,27 @@ export default function App() {
   const purchase = async (pkg: DirectorPackage) => {
     setPaywallBusy(true);
     setPaywallError(null);
+    setAccessMessage(null);
     try {
       const status = await revenueCat.purchase(pkg);
       updateMonetization(status);
       // A consumable flips no entitlement, so the extra show is recorded here.
-      if (isEncorePackage(pkg) && !status.unlimited) {
-        const current = normalizeDailyPass(pass ? ledgerFromState(pass) : null, new Date(), status.unlimited);
-        const bought = grantEncore(current);
-        setPass(bought);
-        await ledgerStorage.save(ledgerFromState(bought));
+      if (isEncorePackage(pkg) && !status.unlimited && pass) {
+        const current = normalizeDailyPass(ledgerFromState(pass), new Date(), false);
+        const recorded = await recordPurchasedEncore({
+          pass: current,
+          saveLedger: (nextLedger) => ledgerStorage.save(nextLedger),
+        });
+        setPass(recorded.pass);
+        if (recorded.persisted) {
+          setLedgerAvailable(true);
+          setSessionEncoreCredits(0);
+        } else {
+          // The purchase itself proves this encore even when storage does not.
+          setLedgerAvailable(false);
+          setSessionEncoreCredits((value) => value + 1);
+          setAccessMessage('Encore purchased. It is ready now, but may not survive an app restart because local saving failed.');
+        }
       }
       setPaywallVisible(false);
     } catch (error) {
@@ -878,6 +957,10 @@ export default function App() {
         {screen === 'lobby' && (
           <Lobby
             pass={pass}
+            ledgerAvailable={ledgerAvailable}
+            sessionEncoreCredits={sessionEncoreCredits}
+            launchBusy={launchBusy}
+            accessMessage={accessMessage}
             onShowPaywall={showPaywall}
             onStart={(choice) => { void start(choice); }}
           />
@@ -973,6 +1056,7 @@ const styles = StyleSheet.create({
   actionTicketLabel: { color: '#2b241c' },
   actionDangerLabel: { color: '#fff8ef' },
   demoNote: { color: '#786c5a', fontSize: 10, textAlign: 'center', marginTop: 12 },
+  lobbyAccessMessage: { color: '#8a2f20', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 10 },
   dailyPassPanel: { borderWidth: 1, borderColor: '#c8bca8', padding: 12, marginBottom: 12, backgroundColor: '#eee2ce' },
   dailyPassKicker: { color: '#7b5515', fontSize: 9, letterSpacing: 1.5, fontWeight: '900' },
   dailyPassCopy: { color: '#4f4538', fontSize: 11, lineHeight: 17, marginTop: 5 },
