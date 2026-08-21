@@ -9,6 +9,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "gateway:local": "node --env-file-if-exists=.env --experimental-strip-types src/live/dev-server.ts",
     "export:web": "expo export --platform web",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test src/**/*.test.ts",

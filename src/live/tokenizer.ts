@@ -34,7 +34,8 @@ async function loadHubTokenizer(model: string): Promise<Tokenizer> {
 }
 
 /**
- * Loads the tokenizer for the exact model id sent to the inference router.
+ * Loads the exact upstream tokenizer selected by the gateway. The serving
+ * provider may use a local alias while TOKENIZER_MODEL keeps this ID exact.
  * The promise is cached per warm server process so a tokenizer is never loaded
  * once per beat. Only the two public tokenizer JSON files are fetched, using the
  * server-only HF token when present. No model weights or image stack are loaded.

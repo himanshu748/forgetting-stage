@@ -38,9 +38,9 @@ The deterministic offline preview preserves the game loop when live generation i
 
 Codex acted as the implementation orchestrator. It audited the PRD against the existing code, identified that the original mobile demo trusted a client transcript and used an approximate 172-word budget, then rebuilt the loop around a server-owned performance store and action-only contract.
 
-Codex implemented and reviewed the exact tokenizer path, eviction probes, recovery rounds, access-state race fixes, native sponsor adapters and the theatrical mobile interface. It ran 122 unit and integration tests, TypeScript checks, Expo Doctor, Android autolinking, web and Hermes exports, two native Gradle builds, secret scanning and an Android 16 emulator judge-path preflight. Official Expo development-client skills guided the native workflow. Earlier branch fixes also used Junie CLI for cast and access regressions.
+Codex implemented and reviewed the exact tokenizer path, eviction probes, recovery rounds, access-state race fixes, native sponsor adapters and the theatrical mobile interface. It ran 126 unit and integration tests, TypeScript checks, Expo Doctor, Android autolinking, web and Hermes exports, two native Gradle builds, secret scanning and an Android 16 emulator judge-path preflight. Official Expo development-client skills guided the native workflow. Earlier branch fixes also used Junie CLI for cast and access regressions.
 
-Codex kept unverified claims out of the product and submission notes. It did not invoke paid model inference or an EAS cloud build during the zero-spend validation pass.
+Codex kept unverified claims out of the product and submission notes. A bounded Hugging Face verification used account-provided credits after explicit approval. No EAS cloud build or intentional out-of-pocket model spend was triggered.
 
 ## Key Features
 
@@ -96,13 +96,15 @@ Without `EXPO_PUBLIC_GENERATION_ENDPOINT`, native play intentionally uses the of
 
 Observed locally on 21 August 2026:
 
-- 122 of 122 tests passed
+- 126 of 126 tests passed
 - TypeScript passed
 - Expo Doctor passed 20 of 20 checks
 - Expo dependency alignment and Android autolinking passed
 - Web and Android Hermes exports passed
 - Android API 36 debug development-client and release-mode builds passed
 - An Android 16 emulator fresh launch opened the daily ticket, entered the offline performance and advanced Meera to Arun without a fatal error
+- The same native development client later reached `Qwen/Qwen3-4B-Instruct-2507` through a temporary HTTPS preview, displayed `AI LIVE · EXACT 1K`, received model-generated narrator and actor beats, pinned the actor line and showed 178 of 1,000 authoritative model tokens
+- `assets/forgetting-stage-native-live.png` records that native state at exactly 1179 by 2556 pixels without a device frame
 - A RevenueCat Test Store offering loaded in the native development client, a simulated monthly Director's Pass purchase completed and the app displayed `DIRECTOR'S PASS ACTIVE`
 - RevenueCat customer history recorded the sandbox subscription and both the configured `directors_pass` entitlement and the temporary setup-wizard entitlement became active
 - After an app-data reset, a simulated `encore_ticket` purchase completed and RevenueCat recorded it as an unattached consumable. A restore attempt found no active short subscription, so physical-device restore remains unverified.
@@ -144,6 +146,7 @@ Use only project-owned visuals and audio. Do not represent the offline preview a
 Existing assets:
 
 - `assets/icon.png`, verified at 1024 by 1024 and ready to attach.
+- `assets/forgetting-stage-native-live.png`, verified at 1179 by 2556 and showing the native live-AI state, pinned truth and model-token meter.
 - `assets/forgetting-stage-web-showcase.png`, verified at 1179 by 2556 but usable only as web-build evidence. It is not the required native screenshot.
 
 ## Submission Readiness Notes
@@ -152,19 +155,19 @@ Devpost project `1373927` is published at https://devpost.com/software/the-forge
 
 The fastest zero-spend route is the Next Gen Award. The participant has supplied an academic email for the final Devpost form, and the full address is intentionally kept out of this repository. Devpost may still verify active enrollment. This route accepts the public source repository and target-device video instead of a public store listing.
 
-Code implementation, the local native preflight and the RevenueCat Test Store purchase are credible. The packet is not ready for final submission because live target-device AI evidence, a physical-device purchase and restore, native media and student verification are still missing.
+Code implementation, the native HF-backed emulator proof, the exact-dimension screenshot and the RevenueCat Test Store purchase are credible. The packet is not ready for final submission because a persistent gateway, the public video, physical-device purchase and restore plus student verification are still missing.
 
 Official deadline: 1 October 2026 at 06:45 UTC, which is 30 September 2026 at 11:45 PM Pacific and 1 October 2026 at 12:15 PM IST.
 
 ## Known Limitations
 
-- No paid live model completion was invoked during the zero-spend validation pass.
+- Bounded Hugging Face completions used account-provided credits after explicit approval. No out-of-pocket amount was intentionally spent, but a billing export was not inspected.
 - The live HTTPS gateway is not deployed and its state store is process-local.
 - RevenueCat project `4c98413b`, the current Test Store offering, the `directors_pass` entitlement plus simulated native subscription and encore purchases are configured and observed. Restore is covered by automated tests but has not been observed after a physical-device reinstall.
 - OneSignal has no verified App ID, FCM setup, deployed campaign or received notification.
 - Layers has no verified App ID, dashboard event or observed experiment response.
 - The emulator preflight is not a physical target-device test.
-- The native screenshot and public demo video are missing.
+- The native 1179 by 2556 screenshot is captured but not yet attached to Devpost. The public demo video is missing.
 - npm audit reports no critical vulnerabilities, with 8 moderate and 8 high transitive Expo or Metro toolchain advisories remaining.
 
 ## TODO Official Form Fields
@@ -172,7 +175,8 @@ Official deadline: 1 October 2026 at 06:45 UTC, which is 30 September 2026 at 11
 Required fields:
 
 - [ ] `assets/icon.png` is the Devpost project thumbnail. Confirm **Includes App Icon** only after verifying that Devpost accepts it as the required attachment.
-- [ ] Capture and attach a native frameless 1179 by 2556 screenshot, then confirm **Includes screenshot**.
+- [x] Capture a native frameless 1179 by 2556 screenshot: `assets/forgetting-stage-native-live.png`.
+- [ ] Attach the native screenshot to Devpost, then confirm **Includes screenshot**.
 - [x] Select **Android** for the app type.
 - [x] RevenueCat project ID ready for the final form: `4c98413b`.
 - [ ] Add the public YouTube or Vimeo demo video.

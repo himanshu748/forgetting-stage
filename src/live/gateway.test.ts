@@ -49,13 +49,15 @@ async function call(
 
 test('starts a server-owned performance with the serving model tokenizer', async () => {
   let authorization = '';
+  let requestedUrl = '';
   let loadedModel = '';
   const liveHandler = handler({
     loadCountTokens: async (model) => {
       loadedModel = model;
       return (text) => text.length;
     },
-    fetchImpl: async (_url, init) => {
+    fetchImpl: async (url, init) => {
+      requestedUrl = String(url);
       authorization = new Headers(init?.headers).get('authorization') ?? '';
       return new Response(JSON.stringify({
         choices: [{ message: { content: 'The curtain rises on a hall full of settled accusations.' } }],
@@ -67,12 +69,104 @@ test('starts a server-owned performance with the serving model tokenizer', async
   const body = record.body as PerformanceResponse;
   assert.equal(record.status, 200);
   assert.equal(loadedModel, 'test-model');
+  assert.equal(requestedUrl, 'https://router.huggingface.co/v1/chat/completions');
   assert.equal(authorization, 'Bearer server-secret');
   assert.equal(body.performanceId, 'server-performance-1');
   assert.equal(body.snapshot.budget, 1_000);
   assert.equal(body.snapshot.maxRounds, 10);
   assert.equal(body.snapshot.memoryTokens <= 1_000, true);
   assert.equal(JSON.stringify(body).includes('server-secret'), false);
+});
+
+test('uses a tokenless loopback Ollama endpoint with its exact public tokenizer', async () => {
+  const localEndpoint = 'http://127.0.0.1:11434/v1/chat/completions';
+  let requestedUrl = '';
+  let authorization: string | null = 'not-checked';
+  let providerModel = '';
+  let tokenizerModel = '';
+  const liveHandler = handler({
+    env: {
+      AI_CHAT_ENDPOINT: localEndpoint,
+      MODEL: 'qwen3:4b-instruct-2507-q4_K_M',
+      TOKENIZER_MODEL: 'Qwen/Qwen3-4B-Instruct-2507',
+    },
+    loadCountTokens: async (model) => {
+      tokenizerModel = model;
+      return (text) => text.length;
+    },
+    fetchImpl: async (url, init) => {
+      requestedUrl = String(url);
+      authorization = new Headers(init?.headers).get('authorization');
+      providerModel = (JSON.parse(String(init?.body)) as { model: string }).model;
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: 'The local curtain rises on one precise remembered accusation.' } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+
+  const record = await call(liveHandler, { action: 'start', premiseId: 'wedding' });
+  assert.equal(record.status, 200);
+  assert.equal(requestedUrl, localEndpoint);
+  assert.equal(authorization, null);
+  assert.equal(providerModel, 'qwen3:4b-instruct-2507-q4_K_M');
+  assert.equal(tokenizerModel, 'Qwen/Qwen3-4B-Instruct-2507');
+});
+
+test('keeps the default Hugging Face endpoint disabled without a server token', async () => {
+  let providerCalls = 0;
+  const liveHandler = handler({
+    env: {},
+    fetchImpl: async () => {
+      providerCalls += 1;
+      return new Response('{}');
+    },
+  });
+
+  const record = await call(liveHandler, { action: 'start', premiseId: 'wedding' });
+  assert.equal(record.status, 503);
+  assert.equal((record.body as { code: string }).code, 'not_configured');
+  assert.equal(providerCalls, 0);
+});
+
+test('rejects a remote custom endpoint without its own token and never forwards HF_TOKEN', async () => {
+  let providerCalls = 0;
+  const liveHandler = handler({
+    env: {
+      AI_CHAT_ENDPOINT: 'https://provider.example/v1/chat/completions',
+      HF_TOKEN: 'must-not-leave-hugging-face',
+    },
+    fetchImpl: async () => {
+      providerCalls += 1;
+      return new Response('{}');
+    },
+  });
+
+  const record = await call(liveHandler, { action: 'start', premiseId: 'wedding' });
+  assert.equal(record.status, 503);
+  assert.equal((record.body as { code: string }).code, 'not_configured');
+  assert.equal(providerCalls, 0);
+});
+
+test('uses the dedicated token for an authenticated remote custom provider', async () => {
+  let authorization = '';
+  const liveHandler = handler({
+    env: {
+      AI_CHAT_ENDPOINT: 'https://provider.example/v1/chat/completions',
+      AI_CHAT_TOKEN: 'custom-provider-secret',
+      HF_TOKEN: 'hugging-face-secret',
+    },
+    loadCountTokens: async () => (text) => text.length,
+    fetchImpl: async (_url, init) => {
+      authorization = new Headers(init?.headers).get('authorization') ?? '';
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: 'A remote custom provider opens the curtain.' } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+
+  const record = await call(liveHandler, { action: 'start', premiseId: 'wedding' });
+  assert.equal(record.status, 200);
+  assert.equal(authorization, 'Bearer custom-provider-secret');
 });
 
 test('rejects transcript or speaker tampering before provider work', async () => {

@@ -18,9 +18,13 @@ the player composes rather than competes.
 
 The repository now includes a mobile-first Expo game with premise selection, a live AI stage, the final drift report and a RevenueCat-powered Director's Pass. One complete AI performance is free per local calendar day and refreshes at midnight; the `directors_pass` entitlement unlocks unlimited performances. If live generation is unavailable, the current turn falls back to a deterministic performance without breaking the game.
 
+![The Forgetting Stage live Android performance](assets/forgetting-stage-native-live.png)
+
+This native Android 16 emulator capture is exactly 1179 by 2556 pixels. It records the Hugging Face-backed `AI LIVE · EXACT 1K` state, two model-generated beats, one pinned actor line and the authoritative 1,000-model-token meter. The temporary HTTPS preview used for this observation is not a persistent public deployment or physical-device video.
+
 ![The Forgetting Stage web lobby](assets/forgetting-stage-web-showcase.png)
 
-This is current **web-build evidence** of the real lobby, captured at a 393 by 852 CSS-pixel viewport with a device scale factor of 3, producing a 1179 by 2556 PNG. It is not the official target-device submission screenshot. Follow the device evidence checklist in [docs/submission/device-validation.md](docs/submission/device-validation.md) before submitting.
+This second image is **web-build evidence** of the real lobby, captured at a 393 by 852 CSS-pixel viewport with a device scale factor of 3. Follow the device evidence checklist in [docs/submission/device-validation.md](docs/submission/device-validation.md) before submitting.
 
 ```bash
 npm install
@@ -47,9 +51,9 @@ The observed local API 36 build and emulator preflight are recorded separately f
 
 The mobile client calls the narrow `POST /api/generate` action contract. It may ask to start, advance, pin, direct or finish. It cannot send a transcript, choose a speaker or restore an erased fact. The server creates the performance, owns every canonical beat and builds each model prompt exclusively from the post-eviction server snapshot.
 
-Live memory uses the tokenizer for the same model ID sent to Hugging Face. The zero-dependency `@huggingface/tokenizers` package counts text with special tokens disabled, matching the original Thousand-Token Theater method. All unpinned shared memory is capped at exactly 1,000 model tokens. The one pinned actor line lives outside that allowance and never evicts. A normal live play is ten rounds, or thirty actor beats. The curtain stays locked until at least one erased seed receives two distinct confident replacements. Exceptionally short output can add at most two recovery rounds, then the app surfaces an honest retry state instead of claiming that forgetting occurred.
+Live memory uses the exact upstream tokenizer selected by `TOKENIZER_MODEL`, or `MODEL` when no tokenizer override is set. The zero-dependency `@huggingface/tokenizers` package counts text with special tokens disabled, matching the original Thousand-Token Theater method. The Ollama quantization below therefore serves the local model tag while counting with its exact `Qwen/Qwen3-4B-Instruct-2507` tokenizer. All unpinned shared memory is capped at exactly 1,000 model tokens. The one pinned actor line lives outside that allowance and never evicts. A normal live play is ten rounds, or thirty actor beats. The curtain stays locked until at least one erased seed receives two distinct confident replacements. Exceptionally short output can add at most two recovery rounds, then the app surfaces an honest retry state instead of claiming that forgetting occurred.
 
-The gateway caps request bodies, applies a provider timeout, rejects transcript or speaker fields and returns safe errors. It uses a 40-request-per-minute shared capacity bucket per server process, enough for one complete play plus its state-only actions, and never trusts caller-supplied forwarding headers as identity. `HF_TOKEN` remains server-only.
+The gateway caps request bodies, applies a provider timeout, rejects transcript or speaker fields and returns safe errors. It uses a 40-request-per-minute shared capacity bucket per server process, enough for one complete play plus its state-only actions and never trusts caller-supplied forwarding headers as identity. `AI_CHAT_ENDPOINT`, `AI_CHAT_TOKEN`, `HF_TOKEN`, `MODEL` and `TOKENIZER_MODEL` remain server-only. A blank `AI_CHAT_ENDPOINT` securely defaults to the Hugging Face router and uses only `HF_TOKEN`. A custom non-loopback provider requires its separate `AI_CHAT_TOKEN`, so a Hugging Face credential is never forwarded to another host. Only exact `localhost`, `127.0.0.1` or `[::1]` endpoints may omit authentication, and tokenless requests contain no Authorization header.
 
 The checked-in session store and rate limiter are process-local. They are suitable for a single persistent preview process, but not a horizontally scaled production deployment where requests can reach different instances. Before public production exposure, replace both with a durable shared store and quota or a server-verifiable signed performance state. Set a hard provider spending limit too. This repository does not claim those deployment controls are configured.
 
@@ -57,13 +61,25 @@ The checked-in session store and rate limiter are process-local. They are suitab
 HF_TOKEN=hf_xxx MODEL=Qwen/Qwen3-4B-Instruct-2507 npx vercel dev
 ```
 
+For a fully local OpenAI-compatible Ollama provider, pull the official 2.5 GB Q4 model and start the gateway with the exact serving and tokenizer IDs:
+
+```bash
+ollama pull qwen3:4b-instruct-2507-q4_K_M
+AI_CHAT_ENDPOINT=http://127.0.0.1:11434/v1/chat/completions \
+MODEL=qwen3:4b-instruct-2507-q4_K_M \
+TOKENIZER_MODEL=Qwen/Qwen3-4B-Instruct-2507 \
+npm run gateway:local
+```
+
+Ollama must already be running on the same machine as the gateway. The local script listens on `http://127.0.0.1:8787/api/generate`. Do not point tokenless configuration at a LAN address, tunnel or remote provider.
+
 Run `api/generate.ts` in one persistent preview process or adapt its store to durable shared storage before using a serverless fleet. Web can use its same-origin `/api/generate` route. iOS and Android require an absolute HTTPS URL for the deployed gateway:
 
 ```bash
 EXPO_PUBLIC_GENERATION_ENDPOINT=https://api.example.com/api/generate
 ```
 
-Never prefix `HF_TOKEN` with `EXPO_PUBLIC_`.
+Never prefix `AI_CHAT_ENDPOINT`, `AI_CHAT_TOKEN`, `HF_TOKEN`, `MODEL` or `TOKENIZER_MODEL` with `EXPO_PUBLIC_`.
 
 ## RevenueCat and the daily curtain
 
@@ -173,7 +189,7 @@ and drift is derived from beat attribution so it needs no extra model call.
 
 ## Status
 
-The native Expo game, pure memory engine, matched experiment backend, server-authoritative live-generation loop, exact serving-model tokenizer, daily free curtain, RevenueCat adapter, OneSignal reminder and Layers experiment hook are implemented. Local Android API 36 debug and release-mode builds pass, and an emulator fresh-install preflight reaches the honestly labeled offline performance. The native RevenueCat Test Store offering, a simulated Director's Pass subscription and a simulated consumable encore have also been observed end to end. Unit and integration tests do not prove live model inference, physical-device restore, OneSignal delivery or Layers dashboard results. Submission still requires a deployed persistent generation endpoint, OneSignal and Layers App IDs if those tracks are claimed, physical target-device evidence, student proof for Next Gen and the required public video.
+The native Expo game, pure memory engine, matched experiment backend, server-authoritative live-generation loop, exact serving-model tokenizer, daily free curtain, RevenueCat adapter, OneSignal reminder and Layers experiment hook are implemented. Local Android API 36 debug and release-mode builds pass. A fresh emulator run received live narrator and actor beats from `Qwen/Qwen3-4B-Instruct-2507` through the HTTPS gateway, displayed the exact token meter and pinned one generated line. The separately tested offline path remains honestly labeled. The native RevenueCat Test Store offering, a simulated Director's Pass subscription and a simulated consumable encore have also been observed end to end. The remaining gates are a persistent public gateway, OneSignal and Layers App IDs if those tracks are claimed, physical-device restore, student proof for Next Gen and the required public video.
 
 ## Licence
 

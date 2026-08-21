@@ -48,7 +48,9 @@ export function createLivePerformanceClient(
 ): LivePerformanceClient {
   const endpoint = options.endpoint ?? '/api/generate';
   const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 20_000;
+  // A local preview can need one cold model load before subsequent beats are fast.
+  // The production gateway still owns its shorter provider timeout.
+  const timeoutMs = options.timeoutMs ?? 45_000;
 
   return async (request) => {
     if (!isConfiguredNativeEndpoint(options.platform, options.endpoint)) {

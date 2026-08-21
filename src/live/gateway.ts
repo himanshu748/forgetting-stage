@@ -147,7 +147,8 @@ function errorCode(message: string): string {
 }
 
 async function fetchCompletion(opts: {
-  token: string;
+  endpoint: string;
+  token?: string;
   model: string;
   generation: TrustedGeneration;
   fetchImpl: FetchLike;
@@ -156,12 +157,11 @@ async function fetchCompletion(opts: {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), opts.timeoutMs);
   try {
-    const response = await opts.fetchImpl(HUGGING_FACE_ENDPOINT, {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+    const response = await opts.fetchImpl(opts.endpoint, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${opts.token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         model: opts.model,
         messages: opts.generation.messages,
@@ -180,6 +180,28 @@ async function fetchCompletion(opts: {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function chatEndpointConfiguration(env: Record<string, string | undefined>): {
+  endpoint: string;
+  token?: string;
+} | null {
+  const configuredEndpoint = env.AI_CHAT_ENDPOINT?.trim();
+  const endpoint = configuredEndpoint || HUGGING_FACE_ENDPOINT;
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  const hostname = url.hostname.toLowerCase();
+  const loopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  // Never forward a Hugging Face credential to a custom provider. A custom
+  // endpoint must use its own token, while exact loopback may run tokenless.
+  const token = (configuredEndpoint ? env.AI_CHAT_TOKEN : env.HF_TOKEN)?.trim() || undefined;
+  if (!loopback && !token) return null;
+  return { endpoint: url.toString(), ...(token ? { token } : {}) };
 }
 
 function publicFallbackReason(error: unknown): string {
@@ -238,8 +260,8 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
       return;
     }
 
-    const token = env.HF_TOKEN;
-    if (!token) {
+    const provider = chatEndpointConfiguration(env);
+    if (!provider) {
       send(res, 503, { error: 'Live generation is not configured', code: 'not_configured', requestId });
       return;
     }
@@ -249,9 +271,10 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
 
       if (action.action === 'start') {
         const model = env.MODEL ?? DEFAULT_MODEL;
+        const tokenizerModel = env.TOKENIZER_MODEL?.trim() || model;
         let countTokens: CountTokens;
         try {
-          countTokens = await loadCountTokens(model);
+          countTokens = await loadCountTokens(tokenizerModel);
         } catch {
           send(res, 503, {
             error: 'The serving-model tokenizer could not be loaded',
@@ -281,7 +304,8 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
         let beat;
         try {
           const text = await fetchCompletion({
-            token,
+            endpoint: provider.endpoint,
+            token: provider.token,
             model,
             generation: buildOpeningGeneration(action.premiseId),
             fetchImpl,
@@ -338,7 +362,8 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
         let beat;
         try {
           const text = await fetchCompletion({
-            token,
+            endpoint: provider.endpoint,
+            token: provider.token,
             model: performance.model,
             generation: buildBeatGeneration(performance.session, prepared.speaker),
             fetchImpl,
@@ -386,7 +411,8 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
       let beat;
       try {
         const text = await fetchCompletion({
-          token,
+          endpoint: provider.endpoint,
+          token: provider.token,
           model: performance.model,
           generation: buildCurtainGeneration(performance.session),
           fetchImpl,
