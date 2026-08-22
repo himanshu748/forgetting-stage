@@ -79,6 +79,7 @@ const publicConfig = readPublicConfig();
 const performanceProvider = createPerformanceProvider(createLivePerformanceClient({
   platform: Platform.OS,
   endpoint: resolveGenerationEndpoint(Platform.OS, publicConfig.generationEndpoint),
+  accessKey: publicConfig.generationAccessKey,
 }));
 const ledgerStorage = createLedgerStorage(() => import('@react-native-async-storage/async-storage'));
 const revenueCat = createRevenueCatClient({

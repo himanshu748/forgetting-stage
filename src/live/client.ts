@@ -5,6 +5,7 @@ export type LivePerformanceClient = (request: PerformanceRequest) => Promise<Per
 export type LivePerformanceClientOptions = {
   platform: string;
   endpoint?: string;
+  accessKey?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 };
@@ -51,6 +52,7 @@ export function createLivePerformanceClient(
   // A local preview can need one cold model load before subsequent beats are fast.
   // The production gateway still owns its shorter provider timeout.
   const timeoutMs = options.timeoutMs ?? 45_000;
+  const accessKey = options.accessKey?.trim();
 
   return async (request) => {
     if (!isConfiguredNativeEndpoint(options.platform, options.endpoint)) {
@@ -61,7 +63,10 @@ export function createLivePerformanceClient(
     try {
       const response = await fetchImpl(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessKey ? { 'X-Forgetting-Stage-Key': accessKey } : {}),
+        },
         body: JSON.stringify(request),
         signal: controller.signal,
       });

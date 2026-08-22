@@ -53,7 +53,9 @@ The mobile client calls the narrow `POST /api/generate` action contract. It may 
 
 Live memory uses the exact upstream tokenizer selected by `TOKENIZER_MODEL`, or `MODEL` when no tokenizer override is set. The zero-dependency `@huggingface/tokenizers` package counts text with special tokens disabled, matching the original Thousand-Token Theater method. The Ollama quantization below therefore serves the local model tag while counting with its exact `Qwen/Qwen3-4B-Instruct-2507` tokenizer. All unpinned shared memory is capped at exactly 1,000 model tokens. The one pinned actor line lives outside that allowance and never evicts. A normal live play is ten rounds, or thirty actor beats. The curtain stays locked until at least one erased seed receives two distinct confident replacements. Exceptionally short output can add at most two recovery rounds, then the app surfaces an honest retry state instead of claiming that forgetting occurred.
 
-The gateway caps request bodies, applies a provider timeout, rejects transcript or speaker fields and returns safe errors. It uses a 40-request-per-minute shared capacity bucket per server process, enough for one complete play plus its state-only actions and never trusts caller-supplied forwarding headers as identity. `AI_CHAT_ENDPOINT`, `AI_CHAT_TOKEN`, `HF_TOKEN`, `MODEL` and `TOKENIZER_MODEL` remain server-only. A blank `AI_CHAT_ENDPOINT` securely defaults to the Hugging Face router and uses only `HF_TOKEN`. A custom non-loopback provider requires its separate `AI_CHAT_TOKEN`, so a Hugging Face credential is never forwarded to another host. Only exact `localhost`, `127.0.0.1` or `[::1]` endpoints may omit authentication, and tokenless requests contain no Authorization header.
+The gateway caps request bodies, applies a provider timeout, rejects transcript or speaker fields and returns safe errors. It uses a 40-request-per-minute shared capacity bucket per server process, enough for one complete play plus its state-only actions and never trusts caller-supplied forwarding headers as identity. `AI_CHAT_ENDPOINT`, `AI_CHAT_TOKEN`, `HF_TOKEN`, `MODEL`, `TOKENIZER_MODEL` and `GATEWAY_ACCESS_KEY` remain server-only. A blank `AI_CHAT_ENDPOINT` securely defaults to the Hugging Face router and uses only `HF_TOKEN`. A custom non-loopback provider requires its separate `AI_CHAT_TOKEN`, so a Hugging Face credential is never forwarded to another host. Only exact `localhost`, `127.0.0.1` or `[::1]` endpoints may omit authentication, and tokenless requests contain no Authorization header.
+
+When `GATEWAY_ACCESS_KEY` is configured, callers must send its matching preview value in `X-Forgetting-Stage-Key`. Native preview builds can supply that value through `EXPO_PUBLIC_GENERATION_ACCESS_KEY`. This blocks casual public endpoint use, but it is not a durable secret because a compiled client can be inspected. Production still needs a shared quota or stronger user authorization.
 
 The checked-in session store and rate limiter are process-local. They are suitable for a single persistent preview process, but not a horizontally scaled production deployment where requests can reach different instances. Before public production exposure, replace both with a durable shared store and quota or a server-verifiable signed performance state. Set a hard provider spending limit too. This repository does not claim those deployment controls are configured.
 
@@ -77,9 +79,12 @@ Run `api/generate.ts` in one persistent preview process or adapt its store to du
 
 ```bash
 EXPO_PUBLIC_GENERATION_ENDPOINT=https://api.example.com/api/generate
+EXPO_PUBLIC_GENERATION_ACCESS_KEY=preview_only_value
 ```
 
 Never prefix `AI_CHAT_ENDPOINT`, `AI_CHAT_TOKEN`, `HF_TOKEN`, `MODEL` or `TOKENIZER_MODEL` with `EXPO_PUBLIC_`.
+
+The checked-in `render.yaml` and lean Docker image configure a single free Render web service in Singapore. A warm instance preserves the server-owned play state and exact tokenizer cache. Render Free sleeps after inactivity and may restart, so prewarm `/healthz` before a demo and start a new performance after any cold start. This remains submission-preview infrastructure, not durable production storage.
 
 ## RevenueCat and the daily curtain
 

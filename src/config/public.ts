@@ -7,6 +7,7 @@ export type RevenueCatPublicKeys = {
 
 export type PublicConfig = {
   generationEndpoint?: string;
+  generationAccessKey?: string;
   revenueCat: RevenueCatPublicKeys;
   oneSignalAppId?: string;
   layersAppId?: string;
@@ -15,6 +16,7 @@ export type PublicConfig = {
 export function readPublicConfig(): PublicConfig {
   return {
     generationEndpoint: process.env.EXPO_PUBLIC_GENERATION_ENDPOINT,
+    generationAccessKey: process.env.EXPO_PUBLIC_GENERATION_ACCESS_KEY,
     revenueCat: {
       test: process.env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY,
       ios: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,

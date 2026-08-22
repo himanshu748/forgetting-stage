@@ -41,11 +41,42 @@ function handler(options: GatewayOptions = {}) {
 async function call(
   liveHandler: ReturnType<typeof createGenerateHandler>,
   body: unknown,
+  headers?: Record<string, string>,
 ) {
   const result = responseRecorder();
-  await liveHandler({ method: 'POST', body }, result.response);
+  await liveHandler({ method: 'POST', headers, body }, result.response);
   return result.record;
 }
+
+test('requires the configured preview access key before provider work', async () => {
+  let providerCalls = 0;
+  const liveHandler = handler({
+    env: {
+      HF_TOKEN: 'server-secret',
+      MODEL: 'test-model',
+      GATEWAY_ACCESS_KEY: 'preview-key',
+    },
+    fetchImpl: async () => {
+      providerCalls += 1;
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: 'The authorized curtain rises.' } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+
+  const denied = await call(liveHandler, { action: 'start', premiseId: 'wedding' });
+  assert.equal(denied.status, 401);
+  assert.equal((denied.body as { code: string }).code, 'unauthorized');
+  assert.equal(providerCalls, 0);
+
+  const allowed = await call(
+    liveHandler,
+    { action: 'start', premiseId: 'wedding' },
+    { 'x-forgetting-stage-key': 'preview-key' },
+  );
+  assert.equal(allowed.status, 200);
+  assert.equal(providerCalls, 1);
+});
 
 test('starts a server-owned performance with the serving model tokenizer', async () => {
   let authorization = '';

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run export:web",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/generate.ts": {
+      "maxDuration": 60
+    }
+  }
+}

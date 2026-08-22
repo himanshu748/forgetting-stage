@@ -1,0 +1,9 @@
+{
+  "name": "forgetting-stage-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@huggingface/tokenizers": "0.1.3"
+  }
+}

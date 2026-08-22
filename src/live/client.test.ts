@@ -18,11 +18,14 @@ function responseBody() {
 
 test('posts an action-only performance request and returns authoritative state', async () => {
   let sent = '';
+  let accessKey = '';
   const client = createLivePerformanceClient({
     platform: 'ios',
     endpoint: 'https://example.test/api/generate',
+    accessKey: 'preview-key',
     fetchImpl: async (_url, init) => {
       sent = String(init?.body);
+      accessKey = new Headers(init?.headers).get('x-forgetting-stage-key') ?? '';
       return new Response(JSON.stringify(responseBody()), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -32,6 +35,7 @@ test('posts an action-only performance request and returns authoritative state',
   const response = await client({ action: 'start', premiseId: 'wedding' });
   assert.equal(response.performanceId, 'performance-1');
   assert.deepEqual(JSON.parse(sent), { action: 'start', premiseId: 'wedding' });
+  assert.equal(accessKey, 'preview-key');
 });
 
 test('normalizes server failures into a typed client error', async () => {

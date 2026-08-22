@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { createGenerateHandler, type GatewayResponse } from './gateway.ts';
 
 const host = process.env.GATEWAY_HOST?.trim() || '127.0.0.1';
-const parsedPort = Number(process.env.GATEWAY_PORT ?? '8787');
+const parsedPort = Number(process.env.GATEWAY_PORT ?? process.env.PORT ?? '8787');
 const port = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort < 65_536
   ? parsedPort
   : 8_787;
@@ -15,12 +15,21 @@ const handler = createGenerateHandler({ timeoutMs });
 
 const server = createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Forgetting-Stage-Key');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.end();
+    return;
+  }
+
+  if ((req.method === 'GET' || req.method === 'HEAD')
+    && (req.url === '/' || req.url === '/healthz')) {
+    res.statusCode = 200;
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/json');
+    res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: true }));
     return;
   }
 
@@ -82,5 +91,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`Local generation gateway listening at http://${host}:${port}/api/generate`);
+  console.log(`Generation gateway listening at http://${host}:${port}/api/generate`);
 });

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 import type { CountTokens } from '../engine/types.ts';
 import {
@@ -139,6 +139,24 @@ function send(res: GatewayResponse, status: number, body: unknown) {
   res.status(status).json(body);
 }
 
+function headerValue(
+  headers: GatewayRequest['headers'],
+  target: string,
+): string | undefined {
+  if (!headers) return undefined;
+  const match = Object.entries(headers).find(([name]) => name.toLowerCase() === target);
+  const value = match?.[1];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function matchesAccessKey(expected: string, received: string | undefined): boolean {
+  if (!received) return false;
+  const expectedBytes = Buffer.from(expected);
+  const receivedBytes = Buffer.from(received.trim());
+  return expectedBytes.length === receivedBytes.length
+    && timingSafeEqual(expectedBytes, receivedBytes);
+}
+
 function errorCode(message: string): string {
   if (message.includes('too large')) return 'body_too_large';
   if (message.includes('valid JSON')) return 'invalid_json';
@@ -247,6 +265,15 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
     if ((req.method ?? 'POST').toUpperCase() !== 'POST') {
       res.setHeader('Allow', 'POST');
       send(res, 405, { error: 'Method not allowed', code: 'method_not_allowed', requestId });
+      return;
+    }
+
+    const accessKey = env.GATEWAY_ACCESS_KEY?.trim();
+    if (accessKey && !matchesAccessKey(
+      accessKey,
+      headerValue(req.headers, 'x-forgetting-stage-key'),
+    )) {
+      send(res, 401, { error: 'Performance access is not authorized', code: 'unauthorized', requestId });
       return;
     }
 

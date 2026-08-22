@@ -1,0 +1,13 @@
+.git
+.github
+.vercel
+android
+assets
+dist
+docs
+ios
+node_modules
+output
+.env
+.env.*
+*.log

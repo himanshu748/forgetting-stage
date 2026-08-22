@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: forgetting-stage-gateway
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: HF_TOKEN
+        sync: false
+      - key: GATEWAY_ACCESS_KEY
+        sync: false
+      - key: MODEL
+        value: Qwen/Qwen3-4B-Instruct-2507
+      - key: TOKENIZER_MODEL
+        value: Qwen/Qwen3-4B-Instruct-2507
+      - key: GATEWAY_TIMEOUT_MS
+        value: "35000"
+
+previews:
+  generation: none
