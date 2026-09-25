@@ -20,6 +20,7 @@ import {
 import {
   MAX_NOTE_CHARS,
   isPerformanceAction,
+  normalizePerformanceCast,
   type PerformanceRequest,
   type PerformanceResponse,
   type PerformanceSource,
@@ -74,6 +75,13 @@ export type GatewayOptions = {
   timeoutMs?: number;
 };
 
+export type GatewayConfigurationStatus = {
+  ready: boolean;
+  code?: 'access_control_not_configured' | 'provider_not_configured';
+  model: string;
+  tokenizerModel: string;
+};
+
 const defaultLimiter = createRateLimiter({ limit: SHARED_REQUESTS_PER_MINUTE, windowMs: 60_000 });
 const defaultStore = createInMemoryPerformanceStore();
 
@@ -113,10 +121,19 @@ function parsePerformanceRequest(body: unknown): PerformanceRequest {
     throw new Error('action must be start, advance, pin, direction or finish');
   }
   if (input.action === 'start') {
+    if (Object.keys(input).some((key) => !['action', 'premiseId', 'cast'].includes(key))) {
+      throw new Error('start request contains an unsupported field');
+    }
     const premiseId = requiredString(input.premiseId, 'premiseId', 64);
     findPremise(premiseId);
-    return { action: 'start', premiseId };
+    return {
+      action: 'start',
+      premiseId,
+      ...('cast' in input ? { cast: normalizePerformanceCast(input.cast) } : {}),
+    };
   }
+
+  if ('cast' in input) throw new Error('the cast can only be set when a performance starts');
 
   const performanceId = requiredString(input.performanceId, 'performanceId', 128);
   if (input.action === 'pin') {
@@ -222,6 +239,21 @@ function chatEndpointConfiguration(env: Record<string, string | undefined>): {
   return { endpoint: url.toString(), ...(token ? { token } : {}) };
 }
 
+export function gatewayConfigurationStatus(
+  env: Record<string, string | undefined> = process.env,
+): GatewayConfigurationStatus {
+  const model = env.MODEL?.trim() || DEFAULT_MODEL;
+  const tokenizerModel = env.TOKENIZER_MODEL?.trim() || model;
+  const accessRequired = env.GATEWAY_REQUIRE_ACCESS_KEY?.trim().toLowerCase() === 'true';
+  if (accessRequired && !env.GATEWAY_ACCESS_KEY?.trim()) {
+    return { ready: false, code: 'access_control_not_configured', model, tokenizerModel };
+  }
+  if (!chatEndpointConfiguration(env)) {
+    return { ready: false, code: 'provider_not_configured', model, tokenizerModel };
+  }
+  return { ready: true, model, tokenizerModel };
+}
+
 function publicFallbackReason(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (/hedged|uncertain|duplicat/i.test(message)) return 'The model answer broke the certainty rule.';
@@ -269,6 +301,14 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
     }
 
     const accessKey = env.GATEWAY_ACCESS_KEY?.trim();
+    if (env.GATEWAY_REQUIRE_ACCESS_KEY?.trim().toLowerCase() === 'true' && !accessKey) {
+      send(res, 503, {
+        error: 'Performance access control is not configured',
+        code: 'access_control_not_configured',
+        requestId,
+      });
+      return;
+    }
     if (accessKey && !matchesAccessKey(
       accessKey,
       headerValue(req.headers, 'x-forgetting-stage-key'),
@@ -297,7 +337,7 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
       const action = parsePerformanceRequest(req.body);
 
       if (action.action === 'start') {
-        const model = env.MODEL ?? DEFAULT_MODEL;
+        const model = env.MODEL?.trim() || DEFAULT_MODEL;
         const tokenizerModel = env.TOKENIZER_MODEL?.trim() || model;
         let countTokens: CountTokens;
         try {
@@ -311,7 +351,7 @@ export function createGenerateHandler(options: GatewayOptions = {}) {
           return;
         }
         const premise = findPremise(action.premiseId);
-        const session = createGameSession(action.premiseId, premise.premise, undefined, {
+        const session = createGameSession(action.premiseId, premise.premise, action.cast, {
           commitOpening: false,
           countTokens,
           budget: LIVE_BUDGET,

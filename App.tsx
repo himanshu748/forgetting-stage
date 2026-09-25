@@ -2,6 +2,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  AccessibilityInfo,
+  AppState,
   Easing,
   KeyboardAvoidingView,
   Modal,
@@ -21,12 +23,13 @@ import {
   createLayersClient,
   type ReminderVariant,
 } from './src/analytics/layers.ts';
-import type { Beat, Drift as DriftReport } from './src/engine/types.ts';
+import type { Beat, Character, Drift as DriftReport } from './src/engine/types.ts';
 import { readPublicConfig, resolveGenerationEndpoint } from './src/config/public.ts';
 import { CAST, PREMISES, type PremiseOption } from './src/game/content.ts';
 import {
   createPerformanceProvider,
   createPerformanceSession,
+  createRehearsalSession,
   performanceDrift,
   performanceSnapshot,
   type PerformanceMode,
@@ -38,6 +41,7 @@ import {
   type SessionSnapshot,
 } from './src/game/session.ts';
 import { createLivePerformanceClient } from './src/live/client.ts';
+import { normalizePerformanceCast } from './src/live/contract.ts';
 import {
   createOneSignalClient,
   type ReminderPermission,
@@ -74,6 +78,9 @@ import {
   type Screen,
 } from './src/monetization/showtime.ts';
 import { createLedgerStorage } from './src/monetization/storage.ts';
+import { TheaterSet } from './src/ui/TheaterSet.tsx';
+import { CastEditor } from './src/ui/CastEditor.tsx';
+import { installWebSurfaceStyles } from './src/ui/web-surface.ts';
 
 const publicConfig = readPublicConfig();
 const performanceProvider = createPerformanceProvider(createLivePerformanceClient({
@@ -105,6 +112,7 @@ const DIRECTOR_CUES = [
 ] as const;
 
 const androidStatusBarHeight = Platform.OS === 'android' ? NativeStatusBar.currentHeight ?? 0 : 0;
+const CAST_STORAGE_KEY = 'forgetting-stage:cast:v1';
 
 type ButtonProps = {
   label: string;
@@ -167,8 +175,8 @@ function ActionButton({
 function Wordmark() {
   return (
     <View style={styles.wordmark}>
-      <Text style={styles.wordmarkKicker}>A MACHINE FOR FUNNY DISASTERS</Text>
       <Text style={styles.wordmarkTitle}>THE FORGETTING STAGE</Text>
+      <Text style={styles.wordmarkKicker}>A machine for funny disasters</Text>
     </View>
   );
 }
@@ -193,6 +201,10 @@ function Lobby({
   launchBusy,
   accessMessage,
   onShowPaywall,
+  onRehearse,
+  onResume,
+  cast,
+  onEditCast,
 }: {
   onStart: (premise: PremiseOption) => void | Promise<void>;
   pass: DailyPassState | null;
@@ -201,9 +213,14 @@ function Lobby({
   launchBusy: boolean;
   accessMessage: string | null;
   onShowPaywall: () => void;
+  onRehearse: (premise: PremiseOption) => void;
+  onResume: (() => void) | null;
+  cast: Character[];
+  onEditCast: () => void;
 }) {
   const { width } = useWindowDimensions();
   const [selected, setSelected] = useState(PREMISES[0]?.id ?? 'wedding');
+  const [showRules, setShowRules] = useState(false);
   const compact = width < 760;
   const choice = PREMISES.find((item) => item.id === selected) ?? PREMISES[0];
   const access = dailyPassAccess(pass, ledgerAvailable, sessionEncoreCredits);
@@ -211,26 +228,34 @@ function Lobby({
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.lobbyScroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.lobbyScroll, compact && styles.lobbyScrollCompact]}>
         <Wordmark />
         <View style={[styles.lobbyGrid, compact && styles.lobbyGridCompact]}>
           <View style={styles.heroColumn}>
-            <Text style={styles.eyebrow}>TONIGHT'S PERFORMANCE</Text>
-            <Text style={styles.heroTitle}>One memory.{`\n`}Three certainties.{`\n`}No second chances.</Text>
-            <Text style={styles.heroBody}>
-              An AI cast improvises inside a deliberately small shared memory. Save one line. Watch everything else become negotiable.
+            <Text accessibilityRole="header" style={[styles.heroTitle, compact && styles.heroTitleCompact]}>One memory.{`\n`}Three certainties.</Text>
+            <Text style={[styles.heroBody, compact && styles.heroBodyCompact]}>
+              Direct a cast that forgets its own story. Save one line. Watch everything else become negotiable.
             </Text>
-            <View style={styles.rulesBox}>
+            <TheaterSet cast={cast} compact={compact} caption={compact ? undefined : 'The company is ready. Their memories are not.'} />
+            <Pressable accessibilityRole="button" onPress={onEditCast} style={styles.castEditButton}>
+              <Text style={styles.castEditText}>Meet & edit the company</Text>
+              <Text style={styles.castEditMeta}>{cast.length} characters</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" accessibilityState={{ expanded: showRules }} onPress={() => setShowRules(!showRules)} style={styles.rulesToggle}>
+              <Text style={styles.rulesToggleText}>{showRules ? 'Close the playbook' : 'How to direct your first play'}</Text>
+              <Text style={styles.rulesToggleText}>{showRules ? '−' : '+'}</Text>
+            </Pressable>
+            {showRules && <View style={styles.rulesBox}>
               <Rule number="01" title="Direct the play" copy="Choose the premise and intervene when the story needs a dangerous nudge." />
               <Rule number="02" title="Pin one truth" copy="One beat survives every eviction. Choose it before the cast rewrites the world." />
               <Rule number="03" title="Study the wreckage" copy="At curtain, compare where each actor began with the certainty they ended on." />
-            </View>
+            </View>}
           </View>
 
           <View style={[styles.ticket, compact && styles.ticketCompact]}>
             <View style={styles.ticketTop}>
-              <Text style={styles.ticketKicker}>SELECT A PREMISE</Text>
-              <Text style={styles.ticketNumber}>NO. 001</Text>
+              <Text accessibilityRole="header" style={styles.ticketHeading}>Choose tonight’s play</Text>
+              <Text style={styles.ticketNumber}>ADMIT ONE</Text>
             </View>
             <View style={styles.premiseList}>
               {PREMISES.map((item) => {
@@ -256,17 +281,10 @@ function Lobby({
                 );
               })}
             </View>
-            <View style={styles.castPreview}>
-              <Text style={styles.ticketKicker}>THE COMPANY</Text>
-              <View style={styles.castRow}>
-                {CAST.map((actor) => (
-                  <View key={actor.name} style={styles.castChip}>
-                    <Text style={styles.castMonogram}>{actor.emoji}</Text>
-                    <Text style={styles.castName}>{actor.name}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
+            {onResume && <View style={styles.resumePanel}>
+              <Text style={styles.dailyPassCopy}>Your unfinished performance is still here.</Text>
+              <ActionButton label="Return to your performance" variant="ticket" onPress={onResume} disabled={launchBusy} />
+            </View>}
             <View style={styles.dailyPassPanel}>
               <Text style={styles.dailyPassKicker}>
                 {access === 'checking'
@@ -295,7 +313,7 @@ function Lobby({
                     : 'One complete AI performance is free every day.'}
               </Text>
             </View>
-            <ActionButton
+            <View style={styles.ticketActions}><ActionButton
               label={launchBusy
                 ? 'Preparing the stage...'
                 : access === 'checking'
@@ -314,7 +332,9 @@ function Lobby({
                 else onShowPaywall();
               }}
             />
-            {!pass?.unlimited && (
+            <ActionButton label="Try an offline rehearsal" variant="ticket" disabled={launchBusy} onPress={() => onRehearse(choice)} />
+            </View>
+            {!pass?.unlimited && Platform.OS !== 'web' && (
               <ActionButton
                 label={access === 'checking' ? 'Checking box office...' : "View Director's Pass"}
                 variant="ticket"
@@ -327,7 +347,7 @@ function Lobby({
                 {accessMessage}
               </Text>
             )}
-            <Text style={styles.demoNote}>A RevenueCat entitlement unlocks unlimited performances. Offline preview remains available.</Text>
+            <Text style={styles.demoNote}>Rehearsals use a prepared script and keep your daily AI ticket.</Text>
           </View>
         </View>
       </ScrollView>
@@ -349,7 +369,7 @@ function MemoryMeter({
   const fraction = Math.min(1, used / budget);
   const underPressure = fraction > 0.8;
   return (
-    <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: budget, now: used }}>
+    <View accessibilityRole="progressbar" accessibilityLabel="Shared memory" accessibilityValue={{ min: 0, max: budget, now: used }}>
       <View style={styles.meterLabels}>
         <Text style={styles.meterTitle}>SHARED MEMORY</Text>
         <Text style={styles.meterValue}>{used} / {budget} {exact ? 'MODEL TOKENS' : 'EST. TOKENS'}</Text>
@@ -423,6 +443,7 @@ function Stage({
   serverActive,
   busy,
   fallbackReason,
+  rehearsal,
 }: {
   session: GameSession;
   snapshot: SessionSnapshot;
@@ -435,11 +456,15 @@ function Stage({
   serverActive: boolean;
   busy: boolean;
   fallbackReason: string | null;
+  rehearsal: boolean;
 }) {
   const { width } = useWindowDimensions();
   const [note, setNote] = useState('');
+  const [scriptExpanded, setScriptExpanded] = useState(false);
+  const [notesExpanded, setNotesExpanded] = useState(false);
   const compact = width < 880;
   const feed = snapshot.memory.filter((beat) => beat.kind !== 'seed');
+  const latestBeat = feed[feed.length - 1];
   const canPin = snapshot.pinnedCount === 0 && !busy;
   const forgettingDisplay = snapshot.forgettingDisplay;
   const contradiction = forgettingDisplay?.contradiction;
@@ -465,22 +490,21 @@ function Stage({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.stageHeader}>
-            <Pressable accessibilityRole="button" onPress={onExit} hitSlop={12}>
-              <Text style={styles.backLabel}>← LEAVE STAGE</Text>
+          <View style={[styles.stageHeader, compact && styles.stageHeaderCompact]}>
+            <Pressable accessibilityRole="button" onPress={onExit} disabled={busy} style={styles.backButton}>
+              <Text style={styles.backLabel}>Lobby</Text>
             </Pressable>
             <View style={styles.stageTitleBlock}>
               <View style={styles.liveStatusRow}>
-                <Text style={styles.stageKicker}>LIVE PERFORMANCE</Text>
                 <View style={[styles.modeBadge, mode === 'offline' && styles.modeBadgeOffline]}>
                   <Text style={styles.modeBadgeText}>
                     {serverActive
                       ? mode === 'live' ? 'AI LIVE · EXACT 1K' : 'SERVER SAFE LINE'
-                      : 'OFFLINE PREVIEW'}
+                      : rehearsal ? 'OFFLINE REHEARSAL' : 'OFFLINE PREVIEW'}
                   </Text>
                 </View>
               </View>
-              <Text style={styles.stageTitle}>{session.premise}</Text>
+              <Text accessibilityRole="header" style={[styles.stageTitle, compact && styles.stageTitleCompact]}>{PREMISES.find((item) => item.id === session.premiseId)?.title ?? session.premise}</Text>
             </View>
             <View style={styles.roundPill}>
               <Text style={styles.roundPillTop}>ROUND</Text>
@@ -490,11 +514,16 @@ function Stage({
 
           <View style={[styles.stageGrid, compact && styles.stageGridCompact]}>
             <View style={styles.scriptPanel}>
-              <View style={styles.scriptHeader}>
-                <Text style={styles.scriptHeading}>SCRIPT STILL REMEMBERED</Text>
-                <Text style={styles.scriptCount}>{feed.length} beats on stage</Text>
+              <TheaterSet cast={session.engine.cast} compact={compact} small activeSpeaker={latestBeat?.kind === 'line' ? latestBeat.speaker : undefined} />
+              <View style={styles.currentLine} accessibilityLiveRegion="polite">
+                {latestBeat && <BeatCard beat={latestBeat} canPin={canPin} onPin={onPin} />}
+                {!latestBeat && <Text style={styles.truthEmpty}>The company is taking its places…</Text>}
               </View>
-              <ScrollView
+              <Pressable accessibilityRole="button" accessibilityState={{ expanded: scriptExpanded }} onPress={() => setScriptExpanded(!scriptExpanded)} style={styles.scriptHeader}>
+                <Text style={styles.scriptHeading}>{contradiction ? 'Inspect the forgetting chain' : 'Remembered script'}</Text>
+                <Text style={styles.scriptCount}>{feed.length} beats · {scriptExpanded ? 'Hide' : 'Open'}</Text>
+              </Pressable>
+              {scriptExpanded && <ScrollView
                 style={styles.scriptScroll}
                 contentContainerStyle={styles.scriptContent}
                 showsVerticalScrollIndicator={false}
@@ -575,10 +604,10 @@ function Stage({
                     ))}
                   </View>
                 )}
-              </ScrollView>
+              </ScrollView>}
             </View>
 
-            <View style={styles.controlPanel}>
+            <View style={[styles.controlPanel, compact && styles.controlPanelCompact]}>
               <MemoryMeter
                 used={snapshot.memoryTokens}
                 budget={snapshot.budget}
@@ -598,23 +627,12 @@ function Stage({
                 )}
               </View>
 
-              <View style={styles.nextPanel}>
-                <Text style={styles.controlKicker}>
-                  {snapshot.canAdvance
-                    ? 'NEXT UNDER THE LIGHT'
-                    : snapshot.canFinish ? 'THE CAST IS WAITING' : 'THE MEMORY TEST FAILED'}
-                </Text>
-                <View style={styles.nextActor}>
-                  <Text style={styles.nextMonogram}>{snapshot.nextSpeaker?.emoji ?? 'C'}</Text>
-                  <View>
-                    <Text style={styles.nextName}>{snapshot.nextSpeaker?.name ?? 'Curtain call'}</Text>
-                    <Text style={styles.nextPersona} numberOfLines={2}>{snapshot.nextSpeaker?.persona ?? 'the last remembered version of the play is ready'}</Text>
-                  </View>
-                </View>
-              </View>
-
               <View style={styles.directionPanel}>
-                <Text style={styles.controlKicker}>DIRECTOR'S NOTE</Text>
+                <Pressable accessibilityRole="button" accessibilityState={{ expanded: notesExpanded }} onPress={() => setNotesExpanded(!notesExpanded)} style={styles.notesToggle}>
+                  <Text style={styles.scriptHeading}>{snapshot.directorNoteUsed ? 'Director’s note sent' : 'Give the cast a direction'}</Text>
+                  <Text style={styles.scriptCount}>{notesExpanded ? 'Hide' : 'Open'}</Text>
+                </Pressable>
+                {notesExpanded && <View style={styles.noteEditor}>
                 <TextInput
                   accessibilityLabel="Director's note"
                   value={note}
@@ -624,7 +642,7 @@ function Stage({
                     : directionDisabled
                       ? 'Wait for the actor to finish this line.'
                       : 'Make them explain the second bride...'}
-                  placeholderTextColor="#706658"
+                  placeholderTextColor={colors.smoke}
                   multiline
                   editable={!directionDisabled}
                   maxLength={120}
@@ -654,11 +672,14 @@ function Stage({
                   <Text style={styles.noteCounter}>{snapshot.directorNoteUsed ? 'intervention spent' : directionDisabled ? 'actor response pending' : `${note.length}/120 · costs memory`}</Text>
                   <ActionButton label={snapshot.directorNoteUsed ? 'Note sent' : 'Send note'} variant="ghost" disabled={directionDisabled || !note.trim()} onPress={() => { void submitDirection(); }} />
                 </View>
+                </View>}
               </View>
-
+            </View>
+          </View>
+        </ScrollView>
               <View style={styles.stageActions}>
                 {snapshot.canAdvance ? (
-                  <ActionButton label={busy ? 'Generating performance...' : actionLabel} disabled={busy} onPress={onAdvance} />
+                  <ActionButton label={busy ? 'The cast is thinking…' : actionLabel} disabled={busy} onPress={onAdvance} />
                 ) : snapshot.canFinish ? (
                   <ActionButton label={busy ? 'Writing the curtain...' : 'Bring down the curtain'} disabled={busy} variant="danger" onPress={onFinish} />
                 ) : (
@@ -673,12 +694,9 @@ function Stage({
                       : 'Live AI was unavailable, so this turn continued in the offline preview.'
                     : snapshot.canFinish
                       ? 'The damage is done. End when ready.'
-                      : 'Every line consumes the shared script.'}
+                      : rehearsal ? 'Prepared script · no AI ticket used' : 'Every line consumes the shared script.'}
                 </Text>
               </View>
-            </View>
-          </View>
-        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -750,7 +768,7 @@ function Paywall({
 function HouseAd() {
   return (
     <View style={styles.houseAd}>
-      <Text style={styles.houseAdKicker}>THE INTERVAL IS SPONSORED</Text>
+      <Text style={styles.houseAdKicker}>FROM THE BOX OFFICE</Text>
       <Text style={styles.houseAdCopy}>
         The interval belongs to the house. The performance never does. The Director's Pass
         removes this card for good.
@@ -781,12 +799,13 @@ function Drift({
   onNewPlay: () => void;
 }) {
   const pinned = drift.survived[0];
+  const { width } = useWindowDimensions();
+  const compact = width < 600;
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.driftScroll} showsVerticalScrollIndicator={false}>
         <View style={styles.driftHeader}>
-          <Text style={styles.driftKicker}>CURTAIN · THE DAMAGE REPORT</Text>
-          <Text style={styles.driftTitle}>They began in one play.{`\n`}They ended in three.</Text>
+          <Text accessibilityRole="header" style={[styles.driftTitle, compact && styles.driftTitleCompact]}>They began in one play.{`\n`}They ended in three.</Text>
           <Text style={styles.driftBody}>
             {drift.forgottenCount} beats vanished from shared memory. The cast never admitted a gap. They simply replaced it.
           </Text>
@@ -815,12 +834,12 @@ function Drift({
                 <Text style={styles.driftIndex}>0{index + 1}</Text>
                 <Text style={styles.driftActor}>{entry.emoji}  {entry.speaker}</Text>
               </View>
-              <View style={styles.driftCompare}>
+              <View style={[styles.driftCompare, compact && styles.driftCompareCompact]}>
                 <View style={styles.driftSide}>
                   <Text style={styles.driftSideLabel}>FIRST CERTAINTY</Text>
                   <Text style={styles.driftQuote}>“{entry.first}”</Text>
                 </View>
-                <Text style={styles.driftArrow}>→</Text>
+                <Text style={styles.driftArrow}>{compact ? '↓' : '→'}</Text>
                 <View style={styles.driftSide}>
                   <Text style={[styles.driftSideLabel, styles.driftSideLabelHot]}>FINAL CERTAINTY</Text>
                   <Text style={[styles.driftQuote, styles.driftQuoteHot]}>“{entry.last}”</Text>
@@ -873,6 +892,13 @@ function Drift({
 export default function App() {
   const [screen, setScreen] = useState<Screen>('lobby');
   const [performance, setPerformance] = useState<PerformanceSession | null>(null);
+  const [rehearsal, setRehearsal] = useState(false);
+  const [completed, setCompleted] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [cast, setCast] = useState<Character[]>(() => CAST.map((actor) => ({ ...actor })));
+  const [castEditorVisible, setCastEditorVisible] = useState(false);
+  const [pendingLaunch, setPendingLaunch] = useState<{ choice: PremiseOption; rehearsal: boolean } | null>(null);
+  const castTouched = useRef(false);
   const [busy, setBusy] = useState(false);
   const [pass, setPass] = useState<DailyPassState | null>(null);
   const [ledgerAvailable, setLedgerAvailable] = useState<boolean | null>(null);
@@ -927,6 +953,47 @@ export default function App() {
     void layers.initialize().then(() => layers.reminderVariant()).then(setReminderVariant);
   }, []);
 
+  useEffect(() => {
+    if (Platform.OS === 'web') return installWebSurfaceStyles();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void import('@react-native-async-storage/async-storage').then(async ({ default: storage }) => {
+      const saved = await storage.getItem(CAST_STORAGE_KEY);
+      if (active && saved && !castTouched.current) setCast(normalizePerformanceCast(JSON.parse(saved)));
+    }).catch(() => { /* A missing or invalid saved cast keeps the original company playable. */ });
+    return () => { active = false; };
+  }, []);
+
+  const saveCast = (next: Character[]) => {
+    castTouched.current = true;
+    setCast(next);
+    setCastEditorVisible(false);
+    void import('@react-native-async-storage/async-storage').then(({ default: storage }) =>
+      storage.setItem(CAST_STORAGE_KEY, JSON.stringify(next)),
+    ).catch(() => setAccessMessage('Your cast is ready for this visit, but this device could not save it for next time.'));
+  };
+
+  useEffect(() => {
+    void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
+    const listener = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => listener.remove();
+  }, []);
+
+  useEffect(() => {
+    const refresh = () => setPass((current) => {
+      if (!current) return current;
+      const next = normalizeDailyPass(ledgerFromState(current), new Date(), current.unlimited);
+      return next.dayKey === current.dayKey ? current : next;
+    });
+    const timer = setInterval(refresh, 30_000);
+    const listener = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refresh();
+    });
+    return () => { clearInterval(timer); listener.remove(); };
+  }, []);
+
   // The one rule the whole day was about: an offer may never interrupt a
   // performance, so every route to the paywall goes through here.
   const showPaywall = () => {
@@ -936,6 +1003,12 @@ export default function App() {
   };
 
   const transition = (next: Screen) => {
+    if (reduceMotion) {
+      fade.stopAnimation();
+      fade.setValue(1);
+      setScreen(next);
+      return;
+    }
     Animated.timing(fade, {
       toValue: 0,
       duration: 120,
@@ -951,6 +1024,15 @@ export default function App() {
         useNativeDriver: Platform.OS !== 'web',
       }).start();
     });
+  };
+
+  const rehearse = (choice: PremiseOption) => {
+    if (busy || launchBusy) return;
+    setPerformance(createRehearsalSession(choice.id, choice.premise, cast));
+    setRehearsal(true);
+    setCompleted(false);
+    setAccessMessage(null);
+    transition('stage');
   };
 
   const start = async (choice: PremiseOption) => {
@@ -999,8 +1081,10 @@ export default function App() {
         }
         setPass(admittedPass);
 
-        const next = createPerformanceSession(choice.id, choice.premise);
+        const next = createPerformanceSession(choice.id, choice.premise, cast);
         setPerformance(next);
+        setRehearsal(false);
+        setCompleted(false);
         setBusy(true);
         transition('stage');
         await performanceProvider.open(next);
@@ -1080,6 +1164,7 @@ export default function App() {
     });
     setBusy(false);
     setRevision((value) => value + 1);
+    setCompleted(true);
     transition('drift');
   };
 
@@ -1162,7 +1247,15 @@ export default function App() {
 
   const replay = () => {
     if (!premise) return;
-    start(premise);
+    if (rehearsal) rehearse(premise);
+    else void start(premise);
+  };
+
+  const requestLaunch = (choice: PremiseOption, local: boolean) => {
+    if (busy || launchBusy) return;
+    if (performance && !completed) setPendingLaunch({ choice, rehearsal: local });
+    else if (local) rehearse(choice);
+    else void start(choice);
   };
 
   return (
@@ -1177,7 +1270,11 @@ export default function App() {
             launchBusy={launchBusy}
             accessMessage={accessMessage}
             onShowPaywall={showPaywall}
-            onStart={(choice) => { void start(choice); }}
+            onStart={(choice) => requestLaunch(choice, false)}
+            onRehearse={(choice) => requestLaunch(choice, true)}
+            onResume={performance && !completed ? () => transition('stage') : null}
+            cast={cast}
+            onEditCast={() => { castTouched.current = true; setCastEditorVisible(true); }}
           />
         )}
         {screen === 'stage' && session && performance && currentSnapshot && (
@@ -1188,6 +1285,7 @@ export default function App() {
             serverActive={performance.serverActive}
             busy={busy}
             fallbackReason={performance.lastFallbackReason}
+            rehearsal={rehearsal}
             onAdvance={() => { void advance(); }}
             onDirection={direction}
             onPin={(id) => { void pin(id); }}
@@ -1199,7 +1297,7 @@ export default function App() {
           <Drift
             drift={performanceDrift(performance)}
             memoryTokens={currentSnapshot.memoryTokens}
-            houseAd={shouldShowHouseAd(momentForScreen(screen), monetization.unlimited)}
+            houseAd={!rehearsal && shouldShowHouseAd(momentForScreen(screen), monetization.unlimited)}
             reminderStatus={reminderStatus}
             reminderVariant={reminderVariant}
             reminderBusy={reminderBusy}
@@ -1209,6 +1307,23 @@ export default function App() {
           />
         )}
       </Animated.View>
+      <CastEditor visible={castEditorVisible} cast={cast} onClose={() => setCastEditorVisible(false)} onSave={saveCast} />
+      <Modal visible={pendingLaunch !== null} transparent animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={() => setPendingLaunch(null)}>
+        <View style={styles.modalShade}>
+          <View style={styles.paywallCard}>
+            <Text accessibilityRole="header" style={styles.paywallTitle}>Leave this story behind?</Text>
+            <Text style={styles.paywallBody}>A new performance replaces your unfinished show, including its pinned truth and progress. Any ticket already used stays spent.</Text>
+            <ActionButton label="Keep my performance" onPress={() => setPendingLaunch(null)} />
+            <ActionButton label={pendingLaunch?.rehearsal ? 'Replace with a rehearsal' : 'Start a new performance'} variant="ghost" onPress={() => {
+              const launch = pendingLaunch;
+              setPendingLaunch(null);
+              if (!launch) return;
+              if (launch.rehearsal) rehearse(launch.choice);
+              else void start(launch.choice);
+            }} />
+          </View>
+        </View>
+      </Modal>
       <Paywall
         visible={paywallVisible}
         status={monetization}
@@ -1226,35 +1341,44 @@ const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: colors.ink },
   flex: { flex: 1 },
   safeArea: { flex: 1, backgroundColor: colors.ink, paddingTop: androidStatusBarHeight },
-  lobbyScroll: { flexGrow: 1, paddingHorizontal: '5%', paddingTop: 22, paddingBottom: 44 },
-  wordmark: { borderBottomWidth: 1, borderBottomColor: colors.line, paddingBottom: 18, marginBottom: 42 },
-  wordmarkKicker: { color: colors.gold, fontSize: 10, letterSpacing: 2.5, fontWeight: '800' },
-  wordmarkTitle: { color: colors.paper, fontSize: 17, marginTop: 8, letterSpacing: 4.4, fontWeight: '900' },
-  lobbyGrid: { flex: 1, flexDirection: 'row', gap: 54, alignItems: 'center', maxWidth: 1240, alignSelf: 'center', width: '100%' },
-  lobbyGridCompact: { flexDirection: 'column', alignItems: 'stretch' },
+  lobbyScroll: { flexGrow: 1, paddingHorizontal: '5%', paddingTop: 28, paddingBottom: 56, width: '100%', maxWidth: 1440, alignSelf: 'center' },
+  lobbyScrollCompact: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 32 },
+  wordmark: { borderBottomWidth: 1, borderBottomColor: colors.line, paddingBottom: 20, marginBottom: 36, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  wordmarkKicker: { color: colors.smoke, fontSize: 12 },
+  wordmarkTitle: { color: colors.paper, fontSize: 13, letterSpacing: 2.4, fontWeight: '700' },
+  lobbyGrid: { flexDirection: 'row', gap: 56, alignItems: 'flex-start', maxWidth: 1240, alignSelf: 'center', width: '100%' },
+  lobbyGridCompact: { flexDirection: 'column', alignItems: 'stretch', gap: 28 },
   heroColumn: { flex: 1.2, minWidth: 0 },
   eyebrow: { color: colors.ember, fontSize: 11, letterSpacing: 2.4, fontWeight: '800', marginBottom: 16 },
-  heroTitle: { color: colors.paper, fontSize: 54, lineHeight: 58, letterSpacing: -2.2, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }), fontWeight: '700' },
-  heroBody: { color: colors.smoke, fontSize: 17, lineHeight: 27, maxWidth: 620, marginTop: 22 },
-  rulesBox: { marginTop: 38, borderTopWidth: 1, borderTopColor: colors.line },
+  heroTitle: { color: colors.paper, fontSize: 62, lineHeight: 65, letterSpacing: -1.9, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }), fontWeight: '400' },
+  heroTitleCompact: { fontSize: 42, lineHeight: 45, letterSpacing: -1.2 },
+  heroBody: { color: colors.smoke, fontSize: 17, lineHeight: 26, maxWidth: 490, marginTop: 18, marginBottom: 24 },
+  heroBodyCompact: { fontSize: 15, lineHeight: 23, marginTop: 12, marginBottom: 20 },
+  rulesBox: { borderTopWidth: 1, borderTopColor: colors.line },
+  rulesToggle: { minHeight: 46, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rulesToggleText: { color: colors.smoke, fontSize: 13 },
+  castEditButton: { flexDirection: 'row', minHeight: 48, alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
+  castEditText: { color: colors.gold, fontSize: 14, fontWeight: '600' },
+  castEditMeta: { color: colors.smoke, fontSize: 12 },
   rule: { flexDirection: 'row', gap: 18, paddingVertical: 17, borderBottomWidth: 1, borderBottomColor: colors.line },
   ruleNumber: { color: colors.gold, fontSize: 11, letterSpacing: 1.8, fontWeight: '900', width: 26 },
   ruleCopy: { flex: 1 },
   ruleTitle: { color: colors.paper, fontSize: 15, fontWeight: '800', marginBottom: 4 },
   ruleBody: { color: colors.smoke, fontSize: 13, lineHeight: 19 },
-  ticket: { flex: 0.8, backgroundColor: colors.paper, padding: 26, borderRadius: 3, minWidth: 320, maxWidth: 480, alignSelf: 'center', width: '100%', shadowColor: '#000', shadowOpacity: 0.38, shadowRadius: 28, shadowOffset: { width: 0, height: 18 }, elevation: 12 },
-  ticketCompact: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
-  ticketTop: { flexDirection: 'row', justifyContent: 'space-between', paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: '#c8bca8' },
+  ticket: { flex: 0.8, backgroundColor: colors.paper, padding: 28, borderRadius: 4, minWidth: 300, maxWidth: 480, alignSelf: 'flex-start', width: '100%' },
+  ticketCompact: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', minWidth: 0, maxWidth: '100%', padding: 20 },
+  ticketHeading: { color: colors.ink, fontSize: 23, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
+  ticketTop: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between', paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: '#c8bca8' },
   ticketKicker: { color: '#5c5245', fontSize: 10, letterSpacing: 1.9, fontWeight: '900' },
-  ticketNumber: { color: '#817564', fontSize: 10, fontFamily: Platform.select({ ios: 'Courier', android: 'monospace', default: 'monospace' }) },
+  ticketNumber: { color: '#655743', fontSize: 9, letterSpacing: 1.2 },
   premiseList: { paddingVertical: 16, gap: 9 },
-  premiseCard: { flexDirection: 'row', alignItems: 'center', gap: 13, borderWidth: 1, borderColor: '#cfc3ae', padding: 15, backgroundColor: '#f6efdf' },
+  premiseCard: { flexDirection: 'row', alignItems: 'center', gap: 13, borderWidth: 1, borderColor: '#cfc3ae', borderRadius: 4, padding: 15, backgroundColor: 'transparent', minHeight: 74 },
   premiseCardActive: { backgroundColor: colors.ink, borderColor: colors.ink },
   premiseCardPressed: { transform: [{ scale: 0.99 }] },
   radio: { width: 13, height: 13, borderRadius: 7, borderWidth: 1.5, borderColor: '#8c806e' },
   radioActive: { borderColor: colors.gold, borderWidth: 4 },
   premiseCopy: { flex: 1 },
-  premiseEyebrow: { color: '#8a7d69', fontSize: 9, letterSpacing: 1.3, fontWeight: '800', textTransform: 'uppercase' },
+  premiseEyebrow: { color: '#6e604c', fontSize: 11 },
   premiseEyebrowActive: { color: colors.gold },
   premiseTitle: { color: '#1e1914', fontSize: 16, fontWeight: '800', marginTop: 3 },
   premiseTitleActive: { color: colors.paper },
@@ -1263,21 +1387,23 @@ const styles = StyleSheet.create({
   castChip: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 7, paddingHorizontal: 9, borderWidth: 1, borderColor: '#c8bca8' },
   castMonogram: { width: 22, height: 22, borderRadius: 11, overflow: 'hidden', textAlign: 'center', lineHeight: 22, backgroundColor: '#1e1914', color: colors.gold, fontSize: 10, fontWeight: '900' },
   castName: { color: '#3d352b', fontSize: 12, fontWeight: '800' },
-  actionButton: { minHeight: 48, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.gold, borderWidth: 1, borderColor: colors.gold },
+  actionButton: { minHeight: 48, borderRadius: 4, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.gold, borderWidth: 1, borderColor: colors.gold },
   actionGhost: { backgroundColor: 'transparent', borderColor: colors.line },
   actionTicket: { backgroundColor: 'transparent', borderColor: '#8a7d69' },
   actionDanger: { backgroundColor: colors.ember, borderColor: colors.ember },
   actionDisabled: { opacity: 0.35 },
   actionPressed: { transform: [{ translateY: 1 }], opacity: 0.9 },
-  actionLabel: { color: colors.ink, fontSize: 12, letterSpacing: 1.3, fontWeight: '900', textTransform: 'uppercase' },
+  actionLabel: { color: colors.ink, fontSize: 14, fontWeight: '700', textAlign: 'center' },
   actionGhostLabel: { color: colors.paper },
   actionTicketLabel: { color: '#2b241c' },
   actionDangerLabel: { color: '#fff8ef' },
-  demoNote: { color: '#786c5a', fontSize: 10, textAlign: 'center', marginTop: 12 },
+  demoNote: { color: '#645643', fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 14 },
+  ticketActions: { gap: 9 },
+  resumePanel: { gap: 10, paddingBottom: 16 },
   lobbyAccessMessage: { color: '#8a2f20', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 10 },
-  dailyPassPanel: { borderWidth: 1, borderColor: '#c8bca8', padding: 12, marginBottom: 12, backgroundColor: '#eee2ce' },
+  dailyPassPanel: { paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#c8bca8', marginBottom: 8 },
   dailyPassKicker: { color: '#7b5515', fontSize: 9, letterSpacing: 1.5, fontWeight: '900' },
-  dailyPassCopy: { color: '#4f4538', fontSize: 11, lineHeight: 17, marginTop: 5 },
+  dailyPassCopy: { color: '#4f4538', fontSize: 13, lineHeight: 19, marginTop: 5 },
   modalShade: { flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   paywallCard: { width: '100%', maxWidth: 480, backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.gold, padding: 24, gap: 12 },
   paywallKicker: { color: colors.gold, fontSize: 10, letterSpacing: 2.2, fontWeight: '900' },
@@ -1293,41 +1419,45 @@ const styles = StyleSheet.create({
   reminderPanel: { borderWidth: 1, borderColor: colors.goldSoft, padding: 18, marginBottom: 22, backgroundColor: '#17130c', gap: 10 },
   reminderKicker: { color: colors.gold, fontSize: 9, letterSpacing: 1.8, fontWeight: '900' },
   reminderCopy: { color: colors.smoke, fontSize: 12, lineHeight: 19 },
-  stageShell: { flexGrow: 1, paddingHorizontal: '3.5%', paddingTop: 16, paddingBottom: 18, minHeight: '100%' },
+  stageShell: { flexGrow: 1, paddingHorizontal: '4%', paddingTop: 12, paddingBottom: 24, width: '100%', maxWidth: 1280, alignSelf: 'center' },
   stageHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 18, borderBottomWidth: 1, borderBottomColor: colors.line, paddingBottom: 14 },
-  backLabel: { color: colors.smoke, fontSize: 10, letterSpacing: 1.7, fontWeight: '800' },
+  stageHeaderCompact: { gap: 10, minHeight: 66 },
+  backButton: { minWidth: 44, minHeight: 44, justifyContent: 'center' },
+  backLabel: { color: colors.smoke, fontSize: 13, fontWeight: '600' },
   stageTitleBlock: { flex: 1, alignItems: 'center' },
   stageKicker: { color: colors.ember, fontSize: 9, letterSpacing: 2, fontWeight: '900' },
   liveStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   modeBadge: { borderWidth: 1, borderColor: colors.mint, paddingVertical: 3, paddingHorizontal: 6 },
   modeBadgeOffline: { borderColor: colors.gold },
-  modeBadgeText: { color: colors.paper, fontSize: 7, letterSpacing: 1.1, fontWeight: '900' },
+  modeBadgeText: { color: colors.paper, fontSize: 10, letterSpacing: 0.6, fontWeight: '600' },
   stageTitle: { color: colors.paper, fontSize: 18, marginTop: 5, textAlign: 'center', fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
+  stageTitleCompact: { fontSize: 16, lineHeight: 20 },
   roundPill: { minWidth: 72, borderWidth: 1, borderColor: colors.line, paddingVertical: 7, paddingHorizontal: 10, alignItems: 'center' },
   roundPillTop: { color: colors.smoke, fontSize: 8, letterSpacing: 1.4, fontWeight: '800' },
   roundPillValue: { color: colors.paper, fontSize: 15, fontWeight: '900', marginTop: 2 },
-  stageGrid: { flex: 1, flexDirection: 'row', gap: 18, paddingTop: 18, minHeight: 0 },
+  stageGrid: { flexDirection: 'row', alignItems: 'flex-start', gap: 24, paddingTop: 20, minHeight: 0 },
   stageGridCompact: { flexDirection: 'column' },
-  scriptPanel: { flex: 1.25, backgroundColor: '#0d0b09', borderWidth: 1, borderColor: colors.line, minHeight: 320 },
-  scriptHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.line },
-  scriptHeading: { color: colors.paper, fontSize: 10, letterSpacing: 1.8, fontWeight: '900' },
-  scriptCount: { color: colors.smoke, fontSize: 10 },
-  scriptScroll: { flex: 1 },
+  scriptPanel: { flex: 1.25, minWidth: 0, width: '100%' },
+  currentLine: { paddingTop: 16, paddingBottom: 10 },
+  scriptHeader: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center', minHeight: 48, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.line },
+  scriptHeading: { color: colors.paper, fontSize: 13, fontWeight: '600' },
+  scriptCount: { color: colors.smoke, fontSize: 12 },
+  scriptScroll: { maxHeight: 380 },
   scriptContent: { padding: 14, gap: 10, paddingBottom: 44 },
-  beatCard: { backgroundColor: colors.panel, borderLeftWidth: 2, borderLeftColor: '#655443', padding: 14 },
-  beatNarration: { backgroundColor: '#121922', borderLeftColor: '#6e8eaa' },
+  beatCard: { backgroundColor: colors.panel, borderRadius: 4, padding: 18 },
+  beatNarration: { backgroundColor: '#151412' },
   beatDirection: { backgroundColor: '#211810', borderLeftColor: colors.ember },
   beatSeed: { backgroundColor: '#11100e', borderLeftColor: '#50483d' },
-  beatPinned: { borderWidth: 1, borderColor: colors.gold, borderLeftWidth: 3, borderLeftColor: colors.gold, backgroundColor: '#201a10' },
-  beatMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 9 },
+  beatPinned: { borderWidth: 1, borderColor: colors.gold, backgroundColor: '#201a10' },
+  beatMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
   beatIdentity: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   beatGlyph: { width: 23, height: 23, borderRadius: 12, overflow: 'hidden', textAlign: 'center', lineHeight: 23, backgroundColor: '#2b241d', color: colors.gold, fontSize: 10, fontWeight: '900' },
   beatSpeaker: { color: colors.paper, fontSize: 12, fontWeight: '900' },
-  beatKind: { color: colors.smoke, fontSize: 8, letterSpacing: 1.1, textTransform: 'uppercase' },
-  beatText: { color: '#d6cbb9', fontSize: 15, lineHeight: 22, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
+  beatKind: { color: colors.smoke, fontSize: 10 },
+  beatText: { color: colors.paper, fontSize: 19, lineHeight: 28, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
   beatTextSeed: { color: colors.smoke, fontStyle: 'italic' },
-  pinButton: { paddingVertical: 6, paddingHorizontal: 8, borderWidth: 1, borderColor: colors.goldSoft },
-  pinButtonText: { color: colors.gold, fontSize: 8, letterSpacing: 1.2, fontWeight: '900' },
+  pinButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderWidth: 1, borderRadius: 4, borderColor: colors.goldSoft },
+  pinButtonText: { color: colors.gold, fontSize: 11, fontWeight: '700' },
   pinnedBadge: { paddingVertical: 6, paddingHorizontal: 8, backgroundColor: colors.gold },
   pinnedBadgeText: { color: colors.ink, fontSize: 8, letterSpacing: 1.1, fontWeight: '900' },
   evictionNotice: { borderWidth: 1, borderColor: '#683226', backgroundColor: '#21110e', padding: 14, marginTop: 4 },
@@ -1346,9 +1476,10 @@ const styles = StyleSheet.create({
   queuedEvictions: { borderWidth: 1, borderColor: '#683226', backgroundColor: '#160e0c', padding: 12, marginTop: 4 },
   queuedEvictionsKicker: { color: colors.ember, fontSize: 8, letterSpacing: 1.3, fontWeight: '900', marginBottom: 6 },
   queuedEvictionsText: { color: '#c99b8e', fontSize: 11, lineHeight: 17, textDecorationLine: 'line-through' },
-  controlPanel: { width: 360, maxWidth: '100%', alignSelf: 'stretch', backgroundColor: colors.panel, borderWidth: 1, borderColor: colors.line, padding: 17, gap: 16 },
-  meterLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 },
-  meterTitle: { color: colors.paper, fontSize: 9, letterSpacing: 1.7, fontWeight: '900' },
+  controlPanel: { width: 340, maxWidth: '100%', padding: 20, gap: 20, backgroundColor: colors.panel, borderRadius: 4 },
+  controlPanelCompact: { width: '100%', padding: 16, gap: 16 },
+  meterLabels: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  meterTitle: { color: colors.paper, fontSize: 11, fontWeight: '700' },
   meterValue: { color: colors.gold, fontSize: 10, fontFamily: Platform.select({ ios: 'Courier', android: 'monospace', default: 'monospace' }) },
   meterTrack: { height: 11, backgroundColor: '#29231d', overflow: 'hidden', position: 'relative' },
   meterTrackHot: { backgroundColor: '#311b15' },
@@ -1356,35 +1487,38 @@ const styles = StyleSheet.create({
   meterFillHot: { backgroundColor: colors.ember },
   meterDangerLine: { position: 'absolute', height: '100%', width: 1, backgroundColor: colors.ember, left: '82%' },
   meterLegend: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 7 },
-  meterHint: { color: '#746a5d', fontSize: 9 },
+  meterHint: { color: colors.smoke, fontSize: 10 },
   meterHintHot: { color: colors.ember },
-  truthPanel: { borderWidth: 1, borderColor: colors.goldSoft, backgroundColor: '#1e180e', padding: 14, minHeight: 108 },
-  controlKicker: { color: colors.smoke, fontSize: 9, letterSpacing: 1.5, fontWeight: '900', marginBottom: 10 },
+  truthPanel: { borderTopWidth: 1, borderTopColor: colors.goldSoft, paddingTop: 16 },
+  controlKicker: { color: colors.smoke, fontSize: 11, fontWeight: '600', marginBottom: 10 },
   truthMark: { color: colors.gold, fontSize: 15, marginBottom: 7 },
   truthValue: { color: colors.paper, fontSize: 14, lineHeight: 20, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }) },
-  truthEmpty: { color: '#8e806e', fontSize: 12, lineHeight: 18 },
+  truthEmpty: { color: colors.smoke, fontSize: 13, lineHeight: 20 },
   nextPanel: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 15 },
   nextActor: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   nextMonogram: { width: 42, height: 42, borderRadius: 21, overflow: 'hidden', textAlign: 'center', lineHeight: 42, color: colors.gold, backgroundColor: '#29231d', fontWeight: '900' },
   nextName: { color: colors.paper, fontSize: 15, fontWeight: '900' },
   nextPersona: { color: colors.smoke, fontSize: 10, lineHeight: 15, marginTop: 2, maxWidth: 240 },
   directionPanel: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 15 },
+  notesToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  noteEditor: { gap: 8 },
   directionInput: { minHeight: 76, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.ink, color: colors.paper, padding: 11, textAlignVertical: 'top', fontSize: 13, lineHeight: 18 },
   directionInputDisabled: { opacity: 0.48 },
   directionCues: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  directionCue: { borderWidth: 1, borderColor: colors.line, backgroundColor: '#191510', paddingVertical: 7, paddingHorizontal: 9 },
+  directionCue: { borderWidth: 1, borderColor: colors.line, backgroundColor: '#191510', minHeight: 44, justifyContent: 'center', paddingVertical: 10, paddingHorizontal: 10 },
   directionCueDisabled: { opacity: 0.35 },
   directionCuePressed: { borderColor: colors.gold, backgroundColor: '#241d12' },
-  directionCueText: { color: colors.smoke, fontSize: 9, letterSpacing: 0.25 },
+  directionCueText: { color: colors.paper, fontSize: 12 },
   directionFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 8 },
-  noteCounter: { color: '#766b5e', fontSize: 9 },
-  stageActions: { marginTop: 'auto', gap: 9 },
-  stageFootnote: { color: '#766b5e', fontSize: 9, textAlign: 'center' },
+  noteCounter: { color: colors.smoke, fontSize: 11, flex: 1 },
+  stageActions: { borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.ink, paddingHorizontal: '5%', paddingTop: 12, paddingBottom: 16, gap: 8, width: '100%', maxWidth: 1280, alignSelf: 'center' },
+  stageFootnote: { color: colors.smoke, fontSize: 11, lineHeight: 16, textAlign: 'center' },
   fallbackFootnote: { color: colors.gold },
   driftScroll: { paddingHorizontal: '5%', paddingTop: 44, paddingBottom: 60, maxWidth: 1120, width: '100%', alignSelf: 'center' },
   driftHeader: { maxWidth: 760, alignSelf: 'center', alignItems: 'center' },
   driftKicker: { color: colors.ember, fontSize: 10, letterSpacing: 2.4, fontWeight: '900' },
   driftTitle: { color: colors.paper, fontSize: 48, lineHeight: 53, textAlign: 'center', letterSpacing: -1.7, marginTop: 18, fontFamily: Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia' }), fontWeight: '700' },
+  driftTitleCompact: { fontSize: 34, lineHeight: 39, letterSpacing: -1 },
   driftBody: { color: colors.smoke, fontSize: 16, lineHeight: 25, textAlign: 'center', maxWidth: 620, marginTop: 18 },
   driftStats: { flexDirection: 'row', borderWidth: 1, borderColor: colors.line, marginTop: 38, marginBottom: 18 },
   stat: { flex: 1, padding: 18, alignItems: 'center', borderRightWidth: 1, borderRightColor: colors.line },
@@ -1401,6 +1535,7 @@ const styles = StyleSheet.create({
   driftIndex: { color: colors.gold, fontSize: 10, fontFamily: Platform.select({ ios: 'Courier', android: 'monospace', default: 'monospace' }) },
   driftActor: { color: colors.paper, fontSize: 15, fontWeight: '900' },
   driftCompare: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  driftCompareCompact: { flexDirection: 'column', alignItems: 'stretch', gap: 12 },
   driftSide: { flex: 1 },
   driftSideLabel: { color: colors.mint, fontSize: 8, letterSpacing: 1.4, fontWeight: '900', marginBottom: 8 },
   driftSideLabelHot: { color: colors.ember },

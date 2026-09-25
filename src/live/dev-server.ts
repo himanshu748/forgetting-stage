@@ -1,6 +1,11 @@
 import { createServer } from 'node:http';
 
-import { createGenerateHandler, type GatewayResponse } from './gateway.ts';
+import {
+  createGenerateHandler,
+  gatewayConfigurationStatus,
+  type GatewayResponse,
+} from './gateway.ts';
+import { loadModelTokenCounter } from './tokenizer.ts';
 
 const host = process.env.GATEWAY_HOST?.trim() || '127.0.0.1';
 const parsedPort = Number(process.env.GATEWAY_PORT ?? process.env.PORT ?? '8787');
@@ -12,6 +17,19 @@ const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0
   ? parsedTimeout
   : 120_000;
 const handler = createGenerateHandler({ timeoutMs });
+const configuration = gatewayConfigurationStatus(process.env);
+if (!configuration.ready && process.env.NODE_ENV === 'production') {
+  throw new Error(`Generation gateway configuration failed: ${configuration.code}`);
+}
+
+let tokenizerState: 'loading' | 'ready' | 'failed' | 'unconfigured' = configuration.ready
+  ? 'loading'
+  : 'unconfigured';
+if (configuration.ready) {
+  void loadModelTokenCounter(configuration.tokenizerModel)
+    .then(() => { tokenizerState = 'ready'; })
+    .catch(() => { tokenizerState = 'failed'; });
+}
 
 const server = createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -24,12 +42,20 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if ((req.method === 'GET' || req.method === 'HEAD')
-    && (req.url === '/' || req.url === '/healthz')) {
+  if ((req.method === 'GET' || req.method === 'HEAD') && req.url === '/') {
     res.statusCode = 200;
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json');
     res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if ((req.method === 'GET' || req.method === 'HEAD') && req.url === '/healthz') {
+    const ready = configuration.ready && tokenizerState === 'ready';
+    res.statusCode = ready ? 200 : 503;
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/json');
+    res.end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: ready }));
     return;
   }
 

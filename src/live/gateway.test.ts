@@ -6,6 +6,12 @@ import { createGenerateHandler, type GatewayOptions, type GatewayResponse } from
 import { createInMemoryPerformanceStore } from './performance-store.ts';
 import { createRateLimiter } from './rate-limit.ts';
 
+const customCast = [
+  { name: 'Zoya', emoji: 'Z', persona: 'the bride who carries the only invitation', style: 'brisk and direct' },
+  { name: 'Ravi', emoji: 'R', persona: 'the groom who has the key to the hall', style: 'romantic and certain' },
+  { name: 'Noor', emoji: 'N', persona: 'the aunt who arranged this entire ceremony', style: 'loudly opinionated' },
+];
+
 function responseRecorder() {
   const record = { status: 0, headers: new Map<string, string>(), body: undefined as unknown };
   const response: GatewayResponse = {
@@ -78,6 +84,26 @@ test('requires the configured preview access key before provider work', async ()
   assert.equal(providerCalls, 1);
 });
 
+test('fails closed when a deployed preview requires an absent access key', async () => {
+  let providerCalls = 0;
+  const liveHandler = handler({
+    env: {
+      HF_TOKEN: 'server-secret',
+      MODEL: 'test-model',
+      GATEWAY_REQUIRE_ACCESS_KEY: 'true',
+    },
+    fetchImpl: async () => {
+      providerCalls += 1;
+      return new Response('{}');
+    },
+  });
+
+  const denied = await call(liveHandler, { action: 'start', premiseId: 'wedding' });
+  assert.equal(denied.status, 503);
+  assert.equal((denied.body as { code: string }).code, 'access_control_not_configured');
+  assert.equal(providerCalls, 0);
+});
+
 test('starts a server-owned performance with the serving model tokenizer', async () => {
   let authorization = '';
   let requestedUrl = '';
@@ -107,6 +133,81 @@ test('starts a server-owned performance with the serving model tokenizer', async
   assert.equal(body.snapshot.maxRounds, 10);
   assert.equal(body.snapshot.memoryTokens <= 1_000, true);
   assert.equal(JSON.stringify(body).includes('server-secret'), false);
+});
+
+test('an edited cast seeds authoritative memory and controls server speaker order', async () => {
+  const prompts: string[] = [];
+  const liveHandler = handler({
+    fetchImpl: async (_url, init) => {
+      prompts.push(String(init?.body));
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: 'The sealed invitation proves the ceremony starts tonight.' } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+  const started = await call(liveHandler, {
+    action: 'start',
+    premiseId: 'wedding',
+    cast: customCast.map((actor) => ({ ...actor, name: ` ${actor.name} ` })),
+  });
+  assert.equal(started.status, 200);
+  const opening = started.body as PerformanceResponse;
+  assert.equal(opening.snapshot.nextSpeaker?.name, 'Zoya');
+  assert.ok(opening.snapshot.memory.some((beat) => beat.speaker === 'Zoya' && beat.text === customCast[0]!.persona));
+
+  for (const name of ['Zoya', 'Ravi', 'Noor']) {
+    const advanced = await call(liveHandler, { action: 'advance', performanceId: opening.performanceId });
+    assert.equal(advanced.status, 200);
+    assert.equal((advanced.body as PerformanceResponse).beat?.speaker, name);
+  }
+  assert.match(prompts[1]!, /You are Zoya/);
+  assert.match(prompts[1]!, /brisk and direct/);
+  assert.equal(prompts.slice(1).some((prompt) => /You are Meera|You are Arun|You are Auntie/.test(prompt)), false);
+});
+
+test('rejects invalid edited casts before tokenizer or provider work', async () => {
+  let providerCalls = 0;
+  let tokenizerLoads = 0;
+  const liveHandler = handler({
+    loadCountTokens: async () => {
+      tokenizerLoads += 1;
+      return (text) => text.length;
+    },
+    fetchImpl: async () => {
+      providerCalls += 1;
+      return new Response('{}');
+    },
+  });
+  const changed = (patch: Record<string, unknown>) => customCast.map((actor, index) => (
+    index === 0 ? { ...actor, ...patch } : { ...actor }
+  ));
+  const invalidCasts: unknown[] = [
+    null,
+    customCast.slice(0, 2),
+    [...customCast, customCast[0]],
+    changed({ name: ' ravi ' }),
+    changed({ name: '' }),
+    changed({ name: 'x'.repeat(25) }),
+    changed({ name: 'Zoya\nDirector' }),
+    changed({ name: 'The play' }),
+    changed({ persona: '' }),
+    changed({ persona: 'x'.repeat(241) }),
+    changed({ style: '' }),
+    changed({ style: 'x'.repeat(121) }),
+    changed({ emoji: 'ZZ' }),
+    changed({ transcript: 'a caller-supplied script' }),
+  ];
+  for (const cast of invalidCasts) {
+    const result = await call(liveHandler, { action: 'start', premiseId: 'wedding', cast });
+    assert.equal(result.status, 400);
+    assert.equal((result.body as { code: string }).code, 'invalid_request');
+  }
+  const extra = await call(liveHandler, {
+    action: 'start', premiseId: 'wedding', cast: customCast, extra: 'unrecognized',
+  });
+  assert.equal(extra.status, 400);
+  assert.equal(providerCalls, 0);
+  assert.equal(tokenizerLoads, 0);
 });
 
 test('uses a tokenless loopback Ollama endpoint with its exact public tokenizer', async () => {

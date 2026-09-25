@@ -97,10 +97,15 @@ function lineFor(
   turn: number,
   speaker: Character,
   longPlay: boolean,
+  cast: Character[],
 ): string {
   const rounds = DEMO_LINES[premiseId] ?? DEMO_LINES.wedding;
   const lines = rounds?.[round - 1];
-  const line = lines?.[turn] ?? `${speaker.name} states a new certainty that nobody else can verify.`;
+  const authored = lines?.[turn];
+  const nameMap = new Map(CAST.map((actor, index) => [actor.name, cast[index]?.name ?? actor.name]));
+  const line = authored
+    ? authored.replace(/\b(?:Meera|Arun|Auntie)\b/g, (name) => nameMap.get(name) ?? name)
+    : `${speaker.name} states a new certainty that nobody else can verify.`;
   return longPlay ? `${line} ${LONG_PLAY_DETAILS[turn % LONG_PLAY_DETAILS.length]}` : line;
 }
 
@@ -352,7 +357,7 @@ export function createGameSession(
     preparedProbeResponses: 0,
   };
   const engine = new TheaterEngine({
-    cast,
+    cast: cast.map((actor) => ({ ...actor })),
     countTokens: options.countTokens ?? countDemoTokens,
     budget: options.budget ?? DEMO_BUDGET,
     seedResponseReservation,
@@ -439,6 +444,7 @@ export function advanceGameSession(session: GameSession, preparedSpeaker?: Chara
       session.turnInRound,
       speaker,
       session.engine.budget >= LIVE_BUDGET,
+      session.engine.cast,
     );
   return commitGeneratedBeat(
     session,

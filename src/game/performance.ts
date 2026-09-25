@@ -1,6 +1,7 @@
-import type { Beat, Drift } from '../engine/types.ts';
-import type { PerformanceResponse } from '../live/contract.ts';
+import type { Beat, Character, Drift } from '../engine/types.ts';
+import { normalizePerformanceCast, type PerformanceResponse } from '../live/contract.ts';
 import type { LivePerformanceClient } from '../live/client.ts';
+import { CAST } from './content.ts';
 import {
   addDirectorNote,
   advanceGameSession,
@@ -123,10 +124,14 @@ export function performanceDrift(performance: PerformanceSession): Drift {
   return performance.authoritativeDrift ?? performance.session.engine.drift();
 }
 
-export function createPerformanceSession(premiseId: string, premise: string): PerformanceSession {
+export function createPerformanceSession(
+  premiseId: string,
+  premise: string,
+  cast?: Character[],
+): PerformanceSession {
   return {
     performanceId: null,
-    session: createGameSession(premiseId, premise, undefined, {
+    session: createGameSession(premiseId, premise, cast ? normalizePerformanceCast(cast) : undefined, {
       commitOpening: false,
       countTokens: countApproxModelTokens,
       budget: LIVE_BUDGET,
@@ -142,13 +147,40 @@ export function createPerformanceSession(premiseId: string, premise: string): Pe
   };
 }
 
+/** A complete local rehearsal, ready to advance without opening a live session. */
+export function createRehearsalSession(
+  premiseId: string,
+  premise: string,
+  cast?: Character[],
+): PerformanceSession {
+  return {
+    performanceId: null,
+    session: createGameSession(premiseId, premise, cast ? normalizePerformanceCast(cast) : undefined, {
+      requiredContradictions: 1,
+      maxExtensionRounds: cast ? LIVE_EXTENSION_ROUNDS : 0,
+    }),
+    mode: 'offline',
+    serverActive: false,
+    authoritativeSnapshot: null,
+    authoritativeDrift: null,
+    lastFallbackReason: null,
+  };
+}
+
 export function createPerformanceProvider(client: LivePerformanceClient): PerformanceProvider {
   return {
     async open(performance) {
       try {
+        const cast = performance.session.engine.cast;
+        const defaultCast = cast.length === CAST.length && cast.every((actor, index) => {
+          const original = CAST[index]!;
+          return actor.name === original.name && actor.emoji === original.emoji
+            && actor.persona === original.persona && actor.style === original.style;
+        });
         const response = await client({
           action: 'start',
           premiseId: performance.session.premiseId,
+          ...(defaultCast ? {} : { cast: cast.map((actor) => ({ ...actor })) }),
         });
         const beat = requiredBeat(response);
         commitGeneratedOpening(performance.session, beat.text);
