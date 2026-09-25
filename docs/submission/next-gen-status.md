@@ -25,6 +25,6 @@ The corrected preview built successfully and was observed on real cloud Pixel de
 
 The [1:40 native demo](https://youtu.be/EXRoKwz3tJI) is public on YouTube. Publication and playback were verified; YouTube reported no copyright issues. It labels offline rehearsal, edited native recordings, still captures and simulated purchases.
 
-The video and updated factual story are saved on Devpost. Live readback confirms the video URL and `submitted_at: null` for Shipaton. Official requirements and security checks were reviewed; the entry is ready for the participant's explicit final submission confirmation and acceptance of the Official Rules and Devpost Terms. A published project page is not proof of final submission.
+The video and updated factual story are saved on Devpost. After the participant's explicit final confirmation, Devpost returned status `Submitted` for submission `1126208`. Independent live project readback confirms `submitted_at: 2026-09-25T12:35:24.542-04:00` for RevenueCat Shipaton 2026 and the attached video URL. The entry is solo, Android, Next Gen only. This is a submission receipt, not a judging or eligibility decision.
 
 Historical live AI and simulated purchase observations are recorded in `device-validation.md`. Physical-device restore, OneSignal campaign delivery and Layers dashboard evidence remain unclaimed.
