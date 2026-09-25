@@ -3,6 +3,9 @@ name: Cloud Android preview
 on:
   push:
     branches: [codex/nextgen-submission-20260925]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   workflow_dispatch:
 
 permissions:
@@ -44,12 +47,12 @@ jobs:
           npm test
           npm run typecheck
           git diff --check
-      - name: Build standalone cloud-emulator APK
+      - name: Build standalone cloud-device APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=x86_64 -PallowDebugReleaseSigning=true '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g'
-      - name: Publish emulator-only preview and checksum
+          ./gradlew :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,x86_64 -PallowDebugReleaseSigning=true '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g'
+      - name: Publish test preview and checksum
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -58,4 +61,4 @@ jobs:
           cd preview-output
           sha256sum forgetting-stage-cloud-preview.apk > SHA256SUMS.txt
           tag="cloud-preview-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh release create "$tag" forgetting-stage-cloud-preview.apk SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'Cloud Android test preview' --notes 'Emulator-only x86_64 Android preview for Next Gen demonstration. Debug-signed and configured for simulated RevenueCat Test Store transactions. Not a store release or a production build. Without a configured generation endpoint, the app visibly uses offline rehearsal/preview. Source commit: '"$GITHUB_SHA"
+          gh release create "$tag" forgetting-stage-cloud-preview.apk SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'Cloud Android test preview' --notes 'ARM64 device and x86_64 emulator Android preview for Next Gen demonstration. Debug-signed and configured for simulated RevenueCat Test Store transactions. Not a store release or a production build. Without a configured generation endpoint, the app visibly uses offline rehearsal/preview. Source commit: '"$GITHUB_SHA"

@@ -17,7 +17,7 @@ The original checkout has iCloud-offloaded files that block reads. A separate cl
 
 ## Native cloud preview
 
-The cloud Android workflow uses a standard GitHub-hosted Linux runner on the public repository. It produces an x86_64 standalone APK for a cloud emulator, using the explicit debug-signing preview flag and RevenueCat Test Store. It does not install an emulator on the participant's Mac, trigger EAS, or claim a production/store release.
+The cloud Android workflow uses a standard GitHub-hosted Linux runner on the public repository. Its first x86_64 build passed in run 36152840737 and published a checksummed prerelease APK. The workflow now targets both ARM64 real devices and x86_64 cloud emulators, using the explicit debug-signing preview flag and RevenueCat Test Store. It does not install an emulator on the participant's Mac, trigger EAS, or claim a production/store release.
 
 The generated APK is a prerelease asset with a checksum. Do not install it as a production release. Native runtime behavior still needs to be observed after a successful build; a started workflow is not a passing native test.
 
