@@ -21,10 +21,10 @@ The cloud Android workflow uses a standard GitHub-hosted Linux runner on the pub
 
 The corrected preview built successfully and was observed on real cloud Pixel devices. On Pixel 7 Pro, a RevenueCat Test Store purchase activated Director's Pass, and an offline rehearsal reached its curtain report with 18 forgotten beats and one protected line. See `native-cloud-validation.md` for exact build identity and limitations. This remains a sandbox preview, not a production release.
 
-## Remaining gates
+## Published demo and saved draft
 
-- Record and upload a demo of at most two minutes to YouTube or Vimeo, then verify public access.
-- Update the public story with only observed results.
-- Complete final official-rules review and security check, submit, and verify the live receipt. A published project page is not proof of final submission.
+The [1:40 native demo](https://youtu.be/EXRoKwz3tJI) is public on YouTube. Publication and playback were verified; YouTube reported no copyright issues. It labels offline rehearsal, edited native recordings, still captures and simulated purchases.
+
+The video and updated factual story are saved on Devpost. Live readback confirms the video URL and `submitted_at: null` for Shipaton. Official requirements and security checks were reviewed; the entry is ready for the participant's explicit final submission confirmation and acceptance of the Official Rules and Devpost Terms. A published project page is not proof of final submission.
 
 Historical live AI and simulated purchase observations are recorded in `device-validation.md`. Physical-device restore, OneSignal campaign delivery and Layers dashboard evidence remain unclaimed.

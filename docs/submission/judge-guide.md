@@ -2,6 +2,8 @@
 
 This is a solo Next Gen entry. There is no app-store listing or production purchase claim.
 
+Watch the [1:40 native Android demo](https://youtu.be/EXRoKwz3tJI). Published September 25, 2026, it combines edited native recordings with labeled still captures. Gameplay is offline rehearsal; purchases are simulated through RevenueCat Test Store.
+
 ## Install the tested native preview
 
 Download the APK and `SHA256SUMS.txt` from the [September 25 cloud preview](https://github.com/himanshu748/forgetting-stage/releases/tag/cloud-preview-36156345363-1).
