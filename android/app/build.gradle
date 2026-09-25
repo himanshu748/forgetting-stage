@@ -123,6 +123,16 @@ android {
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
             crunchPngs enablePngCrunchInRelease.toBoolean()
         }
+        // Standalone, debug-enabled test app for RevenueCat Test Store.
+        // Keep production release settings unchanged and bundle JS (unlike debug).
+        preview {
+            initWith release
+            matchingFallbacks = ['release']
+            debuggable true
+            applicationIdSuffix '.preview'
+            versionNameSuffix '-preview'
+            signingConfig signingConfigs.debug
+        }
     }
     packagingOptions {
         jniLibs {

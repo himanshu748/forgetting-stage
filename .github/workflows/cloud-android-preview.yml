@@ -51,14 +51,19 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,x86_64 -PallowDebugReleaseSigning=true '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g'
+          ./gradlew :app:assemblePreview --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,x86_64 '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g'
+      - name: Verify standalone debug-enabled preview
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest debuggable android/app/build/outputs/apk/preview/app-preview.apk | grep -Fx true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id android/app/build/outputs/apk/preview/app-preview.apk | grep -Fx com.himanshujha.forgettingstage.preview
+          unzip -l android/app/build/outputs/apk/preview/app-preview.apk | grep 'assets/index.android.bundle'
       - name: Publish test preview and checksum
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p preview-output
-          cp android/app/build/outputs/apk/release/app-release.apk preview-output/forgetting-stage-cloud-preview.apk
+          cp android/app/build/outputs/apk/preview/app-preview.apk preview-output/forgetting-stage-cloud-preview.apk
           cd preview-output
           sha256sum forgetting-stage-cloud-preview.apk > SHA256SUMS.txt
           tag="cloud-preview-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh release create "$tag" forgetting-stage-cloud-preview.apk SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'Cloud Android test preview' --notes 'ARM64 device and x86_64 emulator Android preview for Next Gen demonstration. Debug-signed and configured for simulated RevenueCat Test Store transactions. Not a store release or a production build. Without a configured generation endpoint, the app visibly uses offline rehearsal/preview. Source commit: '"$GITHUB_SHA"
+          gh release create "$tag" forgetting-stage-cloud-preview.apk SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'Cloud Android test preview' --notes 'Standalone debug-enabled ARM64/x86_64 Android test app, package com.himanshujha.forgettingstage.preview. Bundled JavaScript; no Metro required. Configured for simulated RevenueCat Test Store transactions. Not a store release or a production build. Without a configured generation endpoint, the app visibly uses offline rehearsal/preview. Source commit: '"$GITHUB_SHA"
