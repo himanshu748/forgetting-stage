@@ -19,11 +19,10 @@ The original checkout has iCloud-offloaded files that block reads. A separate cl
 
 The cloud Android workflow uses a standard GitHub-hosted Linux runner on the public repository. The first x86_64 build and the subsequent ARM64/x86_64 build compiled, but real Pixel 8 testing exposed a release-mode Test Store rejection. Both original prereleases are labeled superseded. The workflow now builds a separate debug-enabled `preview` variant for RevenueCat Test Store, with bundled JavaScript and a separate application ID. It does not install an emulator on the participant's Mac, trigger EAS, or claim a production/store release. See `native-cloud-validation.md` for the failed observation and the remaining runtime gate.
 
-The generated APK is a prerelease asset with a checksum. Do not install it as a production release. Native runtime behavior still needs to be observed after a successful build; a started workflow is not a passing native test.
+The corrected preview built successfully and was observed on real cloud Pixel devices. On Pixel 7 Pro, a RevenueCat Test Store purchase activated Director's Pass, and an offline rehearsal reached its curtain report with 18 forgotten beats and one protected line. See `native-cloud-validation.md` for exact build identity and limitations. This remains a sandbox preview, not a production release.
 
 ## Remaining gates
 
-- Observe the cloud native build, including the real Test Store flow and honestly labeled AI or offline state.
 - Record and upload a demo of at most two minutes to YouTube or Vimeo, then verify public access.
 - Update the public story with only observed results.
 - Complete final official-rules review and security check, submit, and verify the live receipt. A published project page is not proof of final submission.

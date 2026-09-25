@@ -22,11 +22,13 @@ The current source includes editable character names, backstories and speaking s
 
 RevenueCat powers the native box office: a consumable encore ticket and a Director's Pass entitlement for unlimited performances. One AI performance is free each local day, and purchase offers stay outside an active scene.
 
-Native Android testing on August 21 observed the current Test Store offering, a simulated monthly purchase activating the pass and a simulated encore purchase. These were sandbox transactions, not revenue. Restore handling exists and has automated tests, but a successful physical-device reinstall-and-restore flow is not claimed.
+On September 25, a real cloud Pixel 7 Pro running Android 13 displayed RevenueCat's Test Store purchase dialog. A simulated monthly purchase activated Director's Pass and unlocked unlimited performances. Earlier Android testing also observed a simulated encore purchase. These are sandbox transactions, not revenue. Restore handling exists and has automated tests, but a successful physical-device reinstall-and-restore flow is not claimed.
 
 ## What is verified
 
 On September 25, the submission source passed 133 automated tests, TypeScript checking and an Expo web export after a clean dependency install. A secret scan found no leaks in the Git history or updated source.
+
+That day's native cloud tests opened the cast editor, pinned Meera's line and completed an offline rehearsal on Pixel devices. The curtain report showed 18 forgotten beats and one protected line. The demo combines edited native recordings with labeled still captures. Its gameplay uses a prepared offline script; live Hugging Face generation is not running in that recording.
 
 Earlier Android emulator testing observed live Hugging Face narrator and actor responses, a pinned line and the authoritative model-token meter. The attached August 21 native screenshot records that earlier build; it is not a new physical-phone capture.
 

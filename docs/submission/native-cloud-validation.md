@@ -16,4 +16,18 @@ A separate `preview` Android build type is debug-enabled, debug-signed, and uses
 
 The workflow checks the resulting APK's debug flag, separate application ID and embedded JavaScript. RevenueCat's Android implementation checks `ApplicationInfo.FLAG_DEBUGGABLE` when deciding whether Test Store is allowed. See [the Test Store guide](https://www.revenuecat.com/docs/test-and-launch/sandbox/test-store).
 
-The corrected APK still requires a successful native startup and purchase observation. Do not count this fix or another successful build as proof that either flow passed.
+## Corrected preview observed
+
+- Source: `36e0af13427d8630c8cc45d8f084cf0c5c27348d`.
+- Successful build: https://github.com/himanshu748/forgetting-stage/actions/runs/36156345363
+- APK SHA-256: `4e4c018c87a58e1de7f15d3f15c54a9754bea9dd589fcd020c38a23edd850e2c`.
+- Prerelease: https://github.com/himanshu748/forgetting-stage/releases/tag/cloud-preview-36156345363-1
+- The corrected app opened on real cloud Pixel 8 (Android 14), Pixel 7 and Pixel 7 Pro (Android 13) without the fatal release-mode Test Store rejection.
+- On Pixel 7, the cast editor opened and the offline rehearsal accepted a pinned Meera line.
+- On Pixel 7 Pro, RevenueCat displayed its **Test Store Purchase** dialog for the monthly product. Selecting **Test Valid Purchase** returned to the lobby with **Director's Pass active** and **Unlimited performances are unlocked**. This is a simulated transaction, not a charge or revenue.
+- A separate Pixel 7 Pro offline rehearsal reached the curtain report: **18 beats forgotten**, **152 estimated tokens at curtain**, and **1 truth survived**. Meera's saved wedding line remained present. Later dialogue called Arun the estate lawyer.
+- The preview has no generation endpoint configured. These September 25 observations are **offline prepared-script rehearsal**, not fresh live AI generation.
+
+The demonstration combines edited screen recordings and explicitly labeled still captures from these native sessions. The cloud provider's dashboard and logs are cropped out. No browser-rendered gameplay is substituted for Android footage.
+
+BrowserStack's free native-device trial was used. The current GitHub Student offer was not verified to provide year-long native App Live access. No paid upgrade, local Android SDK/emulator installation, production purchase, or physical reinstall-and-restore test was performed.
